@@ -1,9 +1,39 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { apiFetch, getChartHTML } from '../../utils/api';
+
+let WebView: any = null;
+if (Platform.OS !== 'web') {
+  WebView = require('react-native-webview').WebView;
+}
+
+function WebChart({ html }: { html: string }) {
+  if (Platform.OS === 'web') {
+    return (
+      <View style={{ flex: 1, minHeight: 350 }}>
+        <iframe
+          srcDoc={html}
+          style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#000' } as any}
+        />
+      </View>
+    );
+  }
+  if (WebView) {
+    return (
+      <WebView
+        testID="chart-webview"
+        source={{ html }}
+        style={styles.webview}
+        scrollEnabled={false}
+        javaScriptEnabled
+        originWhitelist={['*']}
+      />
+    );
+  }
+  return <View style={styles.chartLoading}><Text style={{ color: '#A1A1AA' }}>Chart not available</Text></View>;
+}
 
 const SYMBOLS = ['NDX', 'QQQ', 'NVDA', 'MSFT', 'AAPL', 'AMZN', 'META', 'TSLA', 'AMD', 'AVGO', 'GOOGL'];
 const TIMEFRAMES = ['1', '5', '15', '60', 'D'];
@@ -74,14 +104,7 @@ export default function ChartsScreen() {
             <ActivityIndicator size="large" color="#00C805" />
           </View>
         ) : (
-          <WebView
-            testID="chart-webview"
-            source={{ html: getChartHTML(candles, symbol) }}
-            style={styles.webview}
-            scrollEnabled={false}
-            javaScriptEnabled
-            originWhitelist={['*']}
-          />
+          <WebChart html={getChartHTML(candles, symbol)} />
         )}
       </View>
 

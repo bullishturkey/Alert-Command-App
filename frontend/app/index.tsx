@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
-import { Redirect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function AuthScreen() {
@@ -23,7 +22,7 @@ export default function AuthScreen() {
     );
   }
 
-  if (user) return <Redirect href="/(tabs)" />;
+  if (user) return null; // Auth guard in _layout.tsx handles redirect
 
   const handleSubmit = async () => {
     if (!email || !password || (!isLogin && !username)) {

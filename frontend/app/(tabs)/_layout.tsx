@@ -1,7 +1,6 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
-import { Redirect } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 
 export default function TabLayout() {
@@ -15,7 +14,7 @@ export default function TabLayout() {
     );
   }
 
-  if (!user) return <Redirect href="/" />;
+  // Auth guard is handled by root _layout.tsx AuthGuard
 
   return (
     <Tabs screenOptions={{

@@ -1,10 +1,24 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { apiFetch, formatPrice, formatNumber, getChartHTML } from '../../utils/api';
+
+let WebView: any = null;
+if (Platform.OS !== 'web') {
+  WebView = require('react-native-webview').WebView;
+}
+
+function StockChart({ html }: { html: string }) {
+  if (Platform.OS === 'web') {
+    return <View style={{ flex: 1, minHeight: 300 }}><iframe srcDoc={html} style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#000' } as any} /></View>;
+  }
+  if (WebView) {
+    return <WebView testID="stock-chart-webview" source={{ html }} style={{ flex: 1, backgroundColor: 'transparent' }} scrollEnabled={false} javaScriptEnabled originWhitelist={['*']} />;
+  }
+  return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><Text style={{ color: '#A1A1AA' }}>Chart unavailable</Text></View>;
+}
 
 const TIMEFRAMES = ['1', '5', '15', '60', 'D'];
 const TF_LABELS: Record<string, string> = { '1': '1m', '5': '5m', '15': '15m', '60': '1H', 'D': '1D' };
@@ -68,14 +82,7 @@ export default function StockDetailScreen() {
 
           {/* Chart */}
           <View style={styles.chartContainer}>
-            <WebView
-              testID="stock-chart-webview"
-              source={{ html: getChartHTML(candles, symbol || '') }}
-              style={styles.webview}
-              scrollEnabled={false}
-              javaScriptEnabled
-              originWhitelist={['*']}
-            />
+            <StockChart html={getChartHTML(candles, symbol || '')} />
           </View>
 
           {/* Timeframes */}
