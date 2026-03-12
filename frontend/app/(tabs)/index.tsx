@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
-import { apiFetch, formatPrice, formatNumber } from '../../utils/api';
+import { apiFetch, formatPrice } from '../../utils/api';
 
 interface Quote {
   symbol: string;
@@ -78,7 +78,6 @@ export default function DashboardScreen() {
           </View>
           <View style={styles.cardInfo}>
             <Text style={styles.cardName} numberOfLines={1}>{item.name}</Text>
-            <Text style={styles.cardVolume}>Vol: {formatNumber(item.volume)}</Text>
           </View>
         </View>
         <View style={styles.cardRight}>
@@ -223,7 +222,6 @@ const styles = StyleSheet.create({
   symbolText: { fontSize: 14, fontWeight: '700' },
   cardInfo: { flex: 1 },
   cardName: { color: '#fff', fontSize: 14, fontWeight: '500' },
-  cardVolume: { color: '#555', fontSize: 11, marginTop: 2 },
   cardRight: { alignItems: 'flex-end' },
   cardPrice: { color: '#fff', fontSize: 17, fontWeight: '700' },
   changeBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginTop: 4, gap: 2 },
