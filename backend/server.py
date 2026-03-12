@@ -483,6 +483,220 @@ async def get_news(user=Depends(get_current_user)):
     return {'articles': articles, 'source': 'mock'}
 
 # =====================
+# PREFLIGHT ENDPOINT
+# =====================
+async def fetch_finnhub_earnings(from_date: str, to_date: str) -> list:
+    if not FINNHUB_KEY:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get('https://finnhub.io/api/v1/calendar/earnings', params={
+                'from': from_date, 'to': to_date, 'token': FINNHUB_KEY
+            })
+            if resp.status_code == 200:
+                data = resp.json()
+                tracked = {'NVDA','MSFT','AAPL','AMZN','META','TSLA','AMD','AVGO','GOOGL'}
+                return [e for e in data.get('earningsCalendar', []) if e.get('symbol') in tracked]
+    except Exception as e:
+        logger.warning(f"Finnhub earnings error: {e}")
+    return []
+
+def get_economic_events_for_week(today: datetime) -> list:
+    """Return known economic events for the current week"""
+    from calendar import monthrange
+    year = today.year
+    month = today.month
+    day = today.day
+    weekday = today.weekday()  # 0=Mon
+    week_start = today - timedelta(days=weekday)
+    week_end = week_start + timedelta(days=6)
+
+    events = []
+
+    # FOMC 2026 meeting dates (2-day meetings, announcement on day 2)
+    fomc_dates = [
+        (1, 28, 29), (3, 18, 19), (5, 6, 7), (6, 17, 18),
+        (7, 29, 30), (9, 16, 17), (11, 4, 5), (12, 16, 17),
+    ]
+    for m, d1, d2 in fomc_dates:
+        meeting_date = datetime(year, m, d2, 18, 0, tzinfo=timezone.utc)
+        if week_start.date() <= meeting_date.date() <= week_end.date():
+            events.append({
+                'event': 'FOMC Interest Rate Decision',
+                'date': meeting_date.strftime('%Y-%m-%d'),
+                'time': '2:00 PM ET',
+                'impact': 'high',
+                'category': 'fed',
+                'estimate': '',
+                'previous': '',
+                'description': 'Federal Reserve interest rate decision and policy statement'
+            })
+
+    # CPI - typically released mid-month (around 12th-14th)
+    cpi_day = 12 if monthrange(year, month)[1] >= 12 else 10
+    cpi_date = datetime(year, month, cpi_day, 12, 30, tzinfo=timezone.utc)
+    if week_start.date() <= cpi_date.date() <= week_end.date():
+        events.append({
+            'event': 'CPI (Consumer Price Index)',
+            'date': cpi_date.strftime('%Y-%m-%d'),
+            'time': '8:30 AM ET',
+            'impact': 'high',
+            'category': 'inflation',
+            'estimate': '',
+            'previous': '',
+            'description': 'Monthly inflation data - key driver of Fed policy and market direction'
+        })
+
+    # PPI - typically day after CPI
+    ppi_date = cpi_date + timedelta(days=1)
+    if week_start.date() <= ppi_date.date() <= week_end.date():
+        events.append({
+            'event': 'PPI (Producer Price Index)',
+            'date': ppi_date.strftime('%Y-%m-%d'),
+            'time': '8:30 AM ET',
+            'impact': 'high',
+            'category': 'inflation',
+            'estimate': '',
+            'previous': '',
+            'description': 'Wholesale inflation data - leading indicator for consumer prices'
+        })
+
+    # NFP (Non-Farm Payrolls) - first Friday of month
+    first_day = datetime(year, month, 1)
+    days_until_friday = (4 - first_day.weekday()) % 7
+    nfp_date = datetime(year, month, 1 + days_until_friday, 12, 30, tzinfo=timezone.utc)
+    if week_start.date() <= nfp_date.date() <= week_end.date():
+        events.append({
+            'event': 'Non-Farm Payrolls (NFP)',
+            'date': nfp_date.strftime('%Y-%m-%d'),
+            'time': '8:30 AM ET',
+            'impact': 'high',
+            'category': 'employment',
+            'estimate': '',
+            'previous': '',
+            'description': 'Monthly jobs report - major market mover'
+        })
+
+    # Initial Jobless Claims - every Thursday
+    days_until_thurs = (3 - weekday) % 7
+    claims_date = today + timedelta(days=days_until_thurs)
+    if week_start.date() <= claims_date.date() <= week_end.date():
+        events.append({
+            'event': 'Initial Jobless Claims',
+            'date': claims_date.strftime('%Y-%m-%d'),
+            'time': '8:30 AM ET',
+            'impact': 'medium',
+            'category': 'employment',
+            'estimate': '',
+            'previous': '',
+            'description': 'Weekly unemployment claims data'
+        })
+
+    # Retail Sales - mid-month, around the 15th
+    retail_day = 15 if monthrange(year, month)[1] >= 15 else 13
+    retail_date = datetime(year, month, retail_day, 12, 30, tzinfo=timezone.utc)
+    if week_start.date() <= retail_date.date() <= week_end.date():
+        events.append({
+            'event': 'Retail Sales',
+            'date': retail_date.strftime('%Y-%m-%d'),
+            'time': '8:30 AM ET',
+            'impact': 'medium',
+            'category': 'economic',
+            'estimate': '',
+            'previous': '',
+            'description': 'Monthly consumer spending data'
+        })
+
+    events.sort(key=lambda x: x['date'])
+    return events
+
+@api_router.get("/preflight")
+async def get_preflight(user=Depends(get_current_user)):
+    """Daily preflight briefing: economic calendar, earnings, breaking news"""
+    now = datetime.now(timezone.utc)
+    today_str = now.strftime('%Y-%m-%d')
+    
+    # 1. Economic events this week
+    economic_events = get_economic_events_for_week(now)
+    
+    # 2. Check DB for any admin-added economic events
+    db_events = await db.economic_events.find(
+        {'date': {'$gte': today_str}}, {'_id': 0}
+    ).sort('date', 1).to_list(20)
+    
+    # Merge DB events with generated ones
+    all_events = economic_events + db_events
+    all_events.sort(key=lambda x: x.get('date', ''))
+    
+    # 3. Earnings calendar from Finnhub (next 30 days)
+    end_date = (now + timedelta(days=30)).strftime('%Y-%m-%d')
+    earnings = await fetch_finnhub_earnings(today_str, end_date)
+    earnings_list = []
+    for e in earnings:
+        earnings_list.append({
+            'symbol': e.get('symbol', ''),
+            'date': e.get('date', ''),
+            'hour': e.get('hour', ''),
+            'epsEstimate': e.get('epsEstimate'),
+            'revenueEstimate': e.get('revenueEstimate'),
+            'epsActual': e.get('epsActual'),
+            'revenueActual': e.get('revenueActual'),
+        })
+    
+    # 4. Breaking news (most recent Finnhub news)
+    finnhub_news = await fetch_finnhub_news()
+    breaking = []
+    if finnhub_news:
+        for item in finnhub_news[:10]:
+            headline = item.get('headline', '')
+            summary = item.get('summary', '')
+            breaking.append({
+                'id': str(item.get('id', uuid.uuid4())),
+                'headline': headline,
+                'source': item.get('source', 'Unknown'),
+                'summary': summary,
+                'sentiment': simple_sentiment(headline + ' ' + summary),
+                'url': item.get('url', ''),
+                'timestamp': datetime.fromtimestamp(item.get('datetime', 0), tz=timezone.utc).isoformat() if item.get('datetime') else now.isoformat()
+            })
+    else:
+        for news in MOCK_NEWS[:8]:
+            ts = now - timedelta(hours=random.randint(0, 6))
+            breaking.append({
+                'id': str(uuid.uuid4()),
+                'headline': news['headline'],
+                'source': news['source'],
+                'summary': news['summary'],
+                'sentiment': news['sentiment'],
+                'url': '',
+                'timestamp': ts.isoformat()
+            })
+    
+    return {
+        'date': today_str,
+        'economic_events': all_events,
+        'earnings': earnings_list,
+        'breaking_news': breaking,
+    }
+
+@api_router.post("/preflight/events")
+async def add_economic_event(body: dict = Body(...), user=Depends(get_admin_user)):
+    """Admin: Add a custom economic event to the calendar"""
+    event = {
+        'id': str(uuid.uuid4()),
+        'event': body.get('event', ''),
+        'date': body.get('date', ''),
+        'time': body.get('time', ''),
+        'impact': body.get('impact', 'medium'),
+        'category': body.get('category', 'economic'),
+        'estimate': body.get('estimate', ''),
+        'previous': body.get('previous', ''),
+        'description': body.get('description', ''),
+    }
+    await db.economic_events.insert_one(event)
+    return {k: v for k, v in event.items() if k != '_id'}
+
+# =====================
 # ALERT ENDPOINTS (NDX Trading Pipeline)
 # =====================
 @api_router.get("/alerts")
