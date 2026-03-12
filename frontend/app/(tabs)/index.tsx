@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -87,9 +87,12 @@ export default function DashboardScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>NDX Command</Text>
-          <Text style={styles.subtitle}>Welcome, {user?.username}</Text>
+        <View style={styles.headerLeft}>
+          <Image source={require('../../assets/ndx-logo.png')} style={styles.headerLogo} resizeMode="contain" />
+          <View>
+            <Text style={styles.greeting}>NDX Command</Text>
+            <Text style={styles.subtitle}>Welcome, {user?.username}</Text>
+          </View>
         </View>
         <View style={styles.headerRight}>
           {user?.is_admin && (
@@ -128,7 +131,9 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#000' },
   loadingContainer: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },
-  greeting: { fontSize: 26, fontWeight: '700', color: '#fff', letterSpacing: 0.5 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerLogo: { width: 40, height: 40, borderRadius: 10 },
+  greeting: { fontSize: 22, fontWeight: '700', color: '#fff', letterSpacing: 0.5 },
   subtitle: { fontSize: 14, color: '#A1A1AA', marginTop: 2 },
   headerRight: { flexDirection: 'row', gap: 12 },
   adminBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(10,132,255,0.1)', justifyContent: 'center', alignItems: 'center' },

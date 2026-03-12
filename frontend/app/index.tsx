@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, ScrollView, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -49,9 +49,7 @@ export default function AuthScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.flex}>
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           <View style={styles.brandSection}>
-            <View style={styles.logoContainer}>
-              <Ionicons name="trending-up" size={48} color="#00C805" />
-            </View>
+            <Image source={require('../assets/ndx-logo.png')} style={styles.logoImage} resizeMode="contain" />
             <Text style={styles.brandName}>NDX Command</Text>
             <Text style={styles.brandTagline}>Trading Intelligence Platform</Text>
           </View>
@@ -124,7 +122,7 @@ const styles = StyleSheet.create({
   scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   loadingContainer: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
   brandSection: { alignItems: 'center', marginBottom: 40 },
-  logoContainer: { width: 80, height: 80, borderRadius: 20, backgroundColor: 'rgba(0,200,5,0.1)', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  logoImage: { width: 90, height: 90, borderRadius: 20, marginBottom: 16 },
   brandName: { fontSize: 32, fontWeight: '700', color: '#fff', letterSpacing: 1 },
   brandTagline: { fontSize: 14, color: '#A1A1AA', marginTop: 4 },
   formCard: { backgroundColor: '#1C1C1E', borderRadius: 16, padding: 24 },

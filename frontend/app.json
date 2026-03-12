@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "NDX Command",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/ndx-logo.png",
     "scheme": "frontend",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
