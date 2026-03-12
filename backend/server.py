@@ -81,7 +81,7 @@ _quote_cache_time: float = 0
 CACHE_TTL = 30
 _ndx_cache: Dict[str, Any] = {}
 _ndx_cache_time: float = 0
-NDX_CACHE_TTL = 15
+NDX_CACHE_TTL = 5
 
 # === AUTH HELPERS ===
 def hash_password(password: str) -> str:
@@ -382,6 +382,14 @@ async def get_me(user=Depends(get_current_user)):
 # =====================
 # MARKET DATA ENDPOINTS
 # =====================
+@api_router.get("/market/ndx")
+async def get_ndx_live(user=Depends(get_current_user)):
+    """Fast NDX-only endpoint with 5s cache for real-time tracking"""
+    quote = await fetch_ndx_quote()
+    if not quote:
+        quote = generate_mock_quote('NDX')
+    return quote
+
 @api_router.get("/market/quotes")
 async def get_all_quotes(user=Depends(get_current_user)):
     global _quote_cache, _quote_cache_time
@@ -505,93 +513,47 @@ async def create_alert(data: AlertCreate, user=Depends(get_admin_user)):
 @api_router.post("/alerts/webhook")
 async def webhook_alert(body: dict = Body(...)):
     """
-    Webhook endpoint for TradingView → Pipedream → NDX Command pipeline.
+    Webhook for TradingView → Pipedream → NDX Command.
     
-    Accepts flexible payload formats:
+    Your Pipedream sends the TradingView alert text as "content".
+    This is typically the NDX price point at time of alert.
     
-    Format 1 (Structured):
-    {
-        "title": "NDX Bullish Divergence",
-        "message": "RSI divergence on 15m. VWAP bounce potential.",
-        "type": "bullish",
-        "ticker": "NDX"
-    }
+    Expected payload from Pipedream:
+    {"content": "24,580.50"}  or  {"content": "NDX at 24,580 - support bounce"}
     
-    Format 2 (TradingView raw):
-    {
-        "text": "NDX ALERT: Bullish divergence forming on RSI..."
-    }
-    
-    Format 3 (Pipedream passthrough):
-    {
-        "alert": "NDX ALERT: Bullish divergence",
-        "price": "24650.50",
-        "direction": "long",
-        "timeframe": "15m"
-    }
+    Also accepts:
+    {"text": "..."}  or  {"price": "24580"}  or  {"title": "...", "message": "..."}
     """
-    # Optional webhook secret validation
-    if WEBHOOK_SECRET and body.get('secret') != WEBHOOK_SECRET:
-        # Only enforce if WEBHOOK_SECRET is set
-        pass
-    
-    # Parse flexible payload formats
-    title = body.get('title', '')
-    message = body.get('message', '')
-    alert_type = body.get('type', 'info')
-    ticker = body.get('ticker', 'NDX')
+    # Extract the alert content - try multiple fields
+    content = body.get('content', '') or body.get('text', '') or body.get('message', '') or body.get('alert', '')
     price = body.get('price', '')
-    direction = body.get('direction', '')
-    timeframe = body.get('timeframe', '')
     
-    # Handle TradingView raw text format
-    if not title and body.get('text'):
-        raw_text = body['text']
-        title = raw_text[:100] if len(raw_text) > 100 else raw_text
-        message = raw_text
+    # If content looks like a price, extract it
+    if content and not price:
+        import re
+        price_match = re.search(r'[\d,]+\.?\d*', content.replace(' ', ''))
+        if price_match:
+            price = price_match.group(0)
     
-    # Handle Pipedream passthrough format
-    if not title and body.get('alert'):
-        title = body['alert']
-    
-    # Auto-detect alert type from content
-    if not alert_type or alert_type == 'info':
-        combined = (title + ' ' + message + ' ' + direction).lower()
-        if any(w in combined for w in ['bullish', 'long', 'buy', 'bounce', 'breakout', 'support', 'reversal up']):
-            alert_type = 'bullish'
-        elif any(w in combined for w in ['bearish', 'short', 'sell', 'breakdown', 'resistance', 'reversal down']):
-            alert_type = 'bearish'
-    
-    # Build rich message with metadata
-    meta_parts = []
+    # Build the alert title
     if price:
-        meta_parts.append(f"Price: {price}")
-    if direction:
-        meta_parts.append(f"Direction: {direction.upper()}")
-    if timeframe:
-        meta_parts.append(f"Timeframe: {timeframe}")
-    if meta_parts and message:
-        message = message + '\n' + ' | '.join(meta_parts)
-    elif meta_parts:
-        message = ' | '.join(meta_parts)
-    
-    if not title:
-        title = f"NDX Alert"
+        title = f"NDX @ {price}"
+    elif content:
+        title = content[:120]
+    else:
+        title = "NDX Trade Signal"
     
     alert = {
         'id': str(uuid.uuid4()),
         'title': title,
-        'message': message or title,
-        'type': alert_type,
-        'ticker': ticker,
-        'severity': body.get('severity', 'high'),
+        'message': content or title,
+        'type': 'signal',
+        'ticker': 'NDX',
+        'severity': 'high',
         'source': 'pipedream',
-        'price': str(price) if price else '',
-        'direction': direction,
-        'timeframe': timeframe,
+        'price': price,
         'created_by': 'TradingView',
         'created_at': datetime.now(timezone.utc).isoformat(),
-        'raw_payload': json.dumps(body)
     }
     await db.alerts.insert_one(alert)
     logger.info(f"Webhook alert received: {title}")

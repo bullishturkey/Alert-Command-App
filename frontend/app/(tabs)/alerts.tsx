@@ -10,21 +10,11 @@ interface Alert {
   message: string;
   type: string;
   ticker: string;
-  severity: string;
-  source: string;
   price: string;
-  direction: string;
-  timeframe: string;
+  source: string;
   created_by: string;
   created_at: string;
 }
-
-const TYPE_CONFIG: Record<string, { icon: string; color: string; bg: string; label: string }> = {
-  bullish: { icon: 'trending-up', color: '#00C805', bg: 'rgba(0,200,5,0.1)', label: 'BULLISH' },
-  bearish: { icon: 'trending-down', color: '#FF5000', bg: 'rgba(255,80,0,0.1)', label: 'BEARISH' },
-  neutral: { icon: 'remove', color: '#FFD60A', bg: 'rgba(255,214,10,0.1)', label: 'NEUTRAL' },
-  info: { icon: 'information-circle', color: '#0A84FF', bg: 'rgba(10,132,255,0.1)', label: 'INFO' },
-};
 
 export default function AlertsScreen() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -45,63 +35,42 @@ export default function AlertsScreen() {
 
   useEffect(() => {
     fetchAlerts();
-    const interval = setInterval(fetchAlerts, 10000);
+    const interval = setInterval(fetchAlerts, 5000);
     return () => clearInterval(interval);
   }, [fetchAlerts]);
 
-  const renderAlert = ({ item }: { item: Alert }) => {
-    const config = TYPE_CONFIG[item.type] || TYPE_CONFIG.info;
+  const renderAlert = ({ item, index }: { item: Alert; index: number }) => {
+    const isNewest = index === 0;
     return (
-      <View testID={`alert-item-${item.id}`} style={styles.alertCard}>
-        {/* Alert Header */}
+      <View testID={`alert-item-${item.id}`} style={[styles.alertCard, isNewest && styles.alertCardNewest]}>
         <View style={styles.alertTop}>
-          <View style={[styles.typeBadge, { backgroundColor: config.bg }]}>
-            <Ionicons name={config.icon as any} size={14} color={config.color} />
-            <Text style={[styles.typeLabel, { color: config.color }]}>{config.label}</Text>
+          <View style={styles.signalBadge}>
+            <Ionicons name="flash" size={12} color="#FFD60A" />
+            <Text style={styles.signalText}>TRADE SIGNAL</Text>
           </View>
-          <View style={styles.alertMeta}>
-            <View style={styles.sourceBadge}>
-              <Ionicons name={item.source === 'pipedream' ? 'flash' : 'shield-checkmark'} size={10} color="#A1A1AA" />
-              <Text style={styles.sourceText}>{item.source === 'pipedream' ? 'TradingView' : 'Admin'}</Text>
-            </View>
-            <Text style={styles.alertTime}>{timeAgo(item.created_at)}</Text>
-          </View>
+          <Text style={styles.alertTime}>{timeAgo(item.created_at)}</Text>
         </View>
 
-        {/* Alert Content */}
-        <Text style={styles.alertTitle}>{item.title}</Text>
-        <Text style={styles.alertMessage}>{item.message}</Text>
+        <View style={styles.priceRow}>
+          <Text style={styles.ndxLabel}>NDX</Text>
+          <Text style={styles.atSymbol}>@</Text>
+          <Text style={styles.priceValue}>{item.price || item.message}</Text>
+        </View>
 
-        {/* Trading Meta (price, direction, timeframe) */}
-        {(item.price || item.direction || item.timeframe) && (
-          <View style={styles.tradingMeta}>
-            {item.price ? (
-              <View style={styles.metaChip}>
-                <Ionicons name="pricetag" size={11} color="#A1A1AA" />
-                <Text style={styles.metaText}>{item.price}</Text>
-              </View>
-            ) : null}
-            {item.direction ? (
-              <View style={[styles.metaChip, { backgroundColor: item.direction === 'long' ? 'rgba(0,200,5,0.1)' : 'rgba(255,80,0,0.1)' }]}>
-                <Ionicons name={item.direction === 'long' ? 'arrow-up' : 'arrow-down'} size={11} color={item.direction === 'long' ? '#00C805' : '#FF5000'} />
-                <Text style={[styles.metaText, { color: item.direction === 'long' ? '#00C805' : '#FF5000' }]}>{item.direction.toUpperCase()}</Text>
-              </View>
-            ) : null}
-            {item.timeframe ? (
-              <View style={styles.metaChip}>
-                <Ionicons name="time" size={11} color="#A1A1AA" />
-                <Text style={styles.metaText}>{item.timeframe}</Text>
-              </View>
-            ) : null}
-          </View>
+        {item.message && item.message !== item.title && item.message !== item.price && (
+          <Text style={styles.alertMessage}>{item.message}</Text>
         )}
 
-        {/* Bottom bar */}
         <View style={styles.alertBottom}>
-          <View style={[styles.tickerBadge, { borderColor: config.color }]}>
-            <Text style={[styles.tickerText, { color: config.color }]}>{item.ticker || 'NDX'}</Text>
+          <View style={styles.sourceRow}>
+            <Ionicons name="pulse" size={12} color="#555" />
+            <Text style={styles.sourceText}>{item.created_by || 'TradingView'}</Text>
           </View>
-          <View style={[styles.severityIndicator, { backgroundColor: item.severity === 'high' ? '#FF5000' : item.severity === 'medium' ? '#FFD60A' : '#A1A1AA' }]} />
+          {isNewest && (
+            <View style={styles.newBadge}>
+              <Text style={styles.newBadgeText}>NEW</Text>
+            </View>
+          )}
         </View>
       </View>
     );
@@ -135,8 +104,8 @@ export default function AlertsScreen() {
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="flash-outline" size={56} color="#27272A" />
-            <Text style={styles.emptyTitle}>No Active Alerts</Text>
-            <Text style={styles.emptyText}>NDX trading alerts from your TradingView pipeline will appear here in real-time.</Text>
+            <Text style={styles.emptyTitle}>Waiting for Signals</Text>
+            <Text style={styles.emptyText}>When TradingView conditions are met, NDX price alerts will appear here instantly.</Text>
           </View>
         }
       />
@@ -154,23 +123,28 @@ const styles = StyleSheet.create({
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#00C805' },
   liveText: { color: '#00C805', fontSize: 11, fontWeight: '800', letterSpacing: 1 },
   listContent: { paddingHorizontal: 20, paddingBottom: 20 },
-  alertCard: { backgroundColor: '#1C1C1E', borderRadius: 14, padding: 16, marginBottom: 12 },
-  alertTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  typeBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, gap: 5 },
-  typeLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
-  alertMeta: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  sourceBadge: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  sourceText: { color: '#555', fontSize: 10, fontWeight: '600' },
-  alertTime: { color: '#555', fontSize: 11 },
-  alertTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 6, lineHeight: 22 },
-  alertMessage: { color: '#A1A1AA', fontSize: 14, lineHeight: 20, marginBottom: 10 },
-  tradingMeta: { flexDirection: 'row', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
-  metaChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#27272A', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, gap: 5 },
-  metaText: { color: '#A1A1AA', fontSize: 12, fontWeight: '600' },
-  alertBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  tickerBadge: { borderWidth: 1, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6 },
-  tickerText: { fontSize: 12, fontWeight: '800' },
-  severityIndicator: { width: 8, height: 8, borderRadius: 4 },
+
+  alertCard: { backgroundColor: '#1C1C1E', borderRadius: 14, padding: 18, marginBottom: 10, borderLeftWidth: 3, borderLeftColor: '#FFD60A' },
+  alertCardNewest: { borderLeftColor: '#00C805', borderWidth: 1, borderColor: 'rgba(0,200,5,0.2)' },
+
+  alertTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  signalBadge: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  signalText: { color: '#FFD60A', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  alertTime: { color: '#555', fontSize: 12 },
+
+  priceRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 8 },
+  ndxLabel: { color: '#A1A1AA', fontSize: 16, fontWeight: '700' },
+  atSymbol: { color: '#555', fontSize: 14 },
+  priceValue: { color: '#fff', fontSize: 28, fontWeight: '800' },
+
+  alertMessage: { color: '#A1A1AA', fontSize: 13, lineHeight: 18, marginBottom: 8 },
+
+  alertBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
+  sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  sourceText: { color: '#555', fontSize: 11 },
+  newBadge: { backgroundColor: 'rgba(0,200,5,0.15)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  newBadgeText: { color: '#00C805', fontSize: 10, fontWeight: '800' },
+
   empty: { alignItems: 'center', paddingTop: 80, paddingHorizontal: 40, gap: 12 },
   emptyTitle: { color: '#fff', fontSize: 18, fontWeight: '600' },
   emptyText: { color: '#555', fontSize: 14, textAlign: 'center', lineHeight: 20 },
