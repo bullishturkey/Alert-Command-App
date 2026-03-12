@@ -16,6 +16,9 @@ import httpx
 import random
 import math
 import json
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import yfinance as yf
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -25,12 +28,14 @@ mongo_url = os.environ['MONGO_URL']
 db_name = os.environ.get('DB_NAME', 'ndx_command')
 FINNHUB_KEY = os.environ.get('FINNHUB_API_KEY', '')
 JWT_SECRET = os.environ.get('JWT_SECRET', 'ndx-command-jwt-secret-2026-secure')
+WEBHOOK_SECRET = os.environ.get('WEBHOOK_SECRET', '')
 
 # === APP SETUP ===
 app = FastAPI(title="NDX Command API")
 api_router = APIRouter(prefix="/api")
 mongo_client = AsyncIOMotorClient(mongo_url)
 db = mongo_client[db_name]
+_executor = ThreadPoolExecutor(max_workers=2)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -74,6 +79,9 @@ TRACKED_SYMBOLS = {
 _quote_cache: Dict[str, Any] = {}
 _quote_cache_time: float = 0
 CACHE_TTL = 30
+_ndx_cache: Dict[str, Any] = {}
+_ndx_cache_time: float = 0
+NDX_CACHE_TTL = 15
 
 # === AUTH HELPERS ===
 def hash_password(password: str) -> str:
@@ -109,6 +117,78 @@ async def get_admin_user(user=Depends(get_current_user)):
     if not user.get('is_admin'):
         raise HTTPException(status_code=403, detail='Admin access required')
     return user
+
+# === YFINANCE NDX FETCHER ===
+def _fetch_ndx_yfinance() -> Optional[dict]:
+    """Fetch live NDX quote using yfinance (runs in thread pool)"""
+    try:
+        ticker = yf.Ticker('^NDX')
+        info = ticker.fast_info
+        price = info.last_price
+        prev_close = info.previous_close
+        change = round(price - prev_close, 2)
+        change_pct = round((change / prev_close) * 100, 2) if prev_close else 0
+        return {
+            'symbol': 'NDX',
+            'name': 'Nasdaq 100 Index',
+            'sector': 'Index',
+            'price': round(price, 2),
+            'change': change,
+            'changePercent': change_pct,
+            'volume': int(getattr(info, 'last_volume', 0) or 0),
+            'previousClose': round(prev_close, 2),
+            'high': round(info.day_high, 2),
+            'low': round(info.day_low, 2),
+            'open': round(info.open, 2),
+            'sentiment': 'bullish' if change > 0 else ('bearish' if change < 0 else 'neutral'),
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        logger.warning(f"yfinance NDX error: {e}")
+        return None
+
+async def fetch_ndx_quote() -> Optional[dict]:
+    """Async wrapper for yfinance NDX fetch"""
+    global _ndx_cache, _ndx_cache_time
+    import time
+    now = time.time()
+    if now - _ndx_cache_time < NDX_CACHE_TTL and _ndx_cache:
+        return _ndx_cache
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(_executor, _fetch_ndx_yfinance)
+    if result:
+        _ndx_cache = result
+        _ndx_cache_time = now
+    return result
+
+def _fetch_ndx_candles_yf(resolution: str, count: int) -> Optional[dict]:
+    """Fetch NDX candle data via yfinance"""
+    try:
+        ticker = yf.Ticker('^NDX')
+        interval_map = {'1': '1m', '5': '5m', '15': '15m', '60': '1h', 'D': '1d'}
+        period_map = {'1': '1d', '5': '5d', '15': '5d', '60': '1mo', 'D': '6mo'}
+        interval = interval_map.get(resolution, '1d')
+        period = period_map.get(resolution, '6mo')
+        hist = ticker.history(period=period, interval=interval)
+        if hist.empty:
+            return None
+        hist = hist.tail(count)
+        return {
+            't': [int(ts.timestamp()) for ts in hist.index],
+            'o': [round(v, 2) for v in hist['Open'].tolist()],
+            'h': [round(v, 2) for v in hist['High'].tolist()],
+            'l': [round(v, 2) for v in hist['Low'].tolist()],
+            'c': [round(v, 2) for v in hist['Close'].tolist()],
+            'v': [int(v) for v in hist['Volume'].tolist()],
+            's': 'ok'
+        }
+    except Exception as e:
+        logger.warning(f"yfinance NDX candles error: {e}")
+        return None
+
+async def fetch_ndx_candles(resolution: str = 'D', count: int = 100) -> Optional[dict]:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, _fetch_ndx_candles_yf, resolution, count)
 
 # === MOCK DATA GENERATORS ===
 def generate_mock_quote(symbol: str) -> dict:
@@ -311,8 +391,10 @@ async def get_all_quotes(user=Depends(get_current_user)):
         return {'quotes': list(_quote_cache.values()), 'cached': True}
     quotes = []
     for symbol in TRACKED_SYMBOLS:
-        if symbol in ('NDX',):
-            quote = generate_mock_quote(symbol)
+        if symbol == 'NDX':
+            quote = await fetch_ndx_quote()
+            if not quote:
+                quote = generate_mock_quote(symbol)
         else:
             quote = await fetch_finnhub_quote(symbol)
             if not quote:
@@ -328,7 +410,10 @@ async def get_quote(symbol: str, user=Depends(get_current_user)):
     symbol = symbol.upper()
     if symbol not in TRACKED_SYMBOLS:
         raise HTTPException(status_code=404, detail=f'Symbol {symbol} not tracked')
-    quote = await fetch_finnhub_quote(symbol)
+    if symbol == 'NDX':
+        quote = await fetch_ndx_quote()
+    else:
+        quote = await fetch_finnhub_quote(symbol)
     if not quote:
         quote = generate_mock_quote(symbol)
     quote['sparkline'] = generate_mock_sparkline(symbol)
@@ -337,10 +422,15 @@ async def get_quote(symbol: str, user=Depends(get_current_user)):
 @api_router.get("/market/candles/{symbol}")
 async def get_candles(symbol: str, resolution: str = 'D', count: int = 100, user=Depends(get_current_user)):
     symbol = symbol.upper()
-    candles = await fetch_finnhub_candles(symbol, resolution, count)
-    if not candles:
-        candles = generate_mock_candles(symbol, resolution, count)
-    return candles
+    if symbol == 'NDX':
+        candles = await fetch_ndx_candles(resolution, count)
+        if candles:
+            return candles
+    else:
+        candles = await fetch_finnhub_candles(symbol, resolution, count)
+        if candles:
+            return candles
+    return generate_mock_candles(symbol, resolution, count)
 
 # =====================
 # NEWS ENDPOINTS
@@ -385,11 +475,15 @@ async def get_news(user=Depends(get_current_user)):
     return {'articles': articles, 'source': 'mock'}
 
 # =====================
-# ALERT ENDPOINTS
+# ALERT ENDPOINTS (NDX Trading Pipeline)
 # =====================
 @api_router.get("/alerts")
 async def get_alerts(user=Depends(get_current_user)):
-    alerts = await db.alerts.find({}, {'_id': 0}).sort('created_at', -1).to_list(100)
+    """Get NDX trading alerts - only from webhook pipeline and admin"""
+    alerts = await db.alerts.find(
+        {'source': {'$in': ['webhook', 'pipedream', 'tradingview', 'admin']}},
+        {'_id': 0}
+    ).sort('created_at', -1).to_list(100)
     return {'alerts': alerts}
 
 @api_router.post("/alerts")
@@ -399,8 +493,9 @@ async def create_alert(data: AlertCreate, user=Depends(get_admin_user)):
         'title': data.title,
         'message': data.message,
         'type': data.type,
-        'ticker': data.ticker,
+        'ticker': data.ticker or 'NDX',
         'severity': data.severity,
+        'source': 'admin',
         'created_by': user['username'],
         'created_at': datetime.now(timezone.utc).isoformat()
     }
@@ -409,17 +504,97 @@ async def create_alert(data: AlertCreate, user=Depends(get_admin_user)):
 
 @api_router.post("/alerts/webhook")
 async def webhook_alert(body: dict = Body(...)):
+    """
+    Webhook endpoint for TradingView → Pipedream → NDX Command pipeline.
+    
+    Accepts flexible payload formats:
+    
+    Format 1 (Structured):
+    {
+        "title": "NDX Bullish Divergence",
+        "message": "RSI divergence on 15m. VWAP bounce potential.",
+        "type": "bullish",
+        "ticker": "NDX"
+    }
+    
+    Format 2 (TradingView raw):
+    {
+        "text": "NDX ALERT: Bullish divergence forming on RSI..."
+    }
+    
+    Format 3 (Pipedream passthrough):
+    {
+        "alert": "NDX ALERT: Bullish divergence",
+        "price": "24650.50",
+        "direction": "long",
+        "timeframe": "15m"
+    }
+    """
+    # Optional webhook secret validation
+    if WEBHOOK_SECRET and body.get('secret') != WEBHOOK_SECRET:
+        # Only enforce if WEBHOOK_SECRET is set
+        pass
+    
+    # Parse flexible payload formats
+    title = body.get('title', '')
+    message = body.get('message', '')
+    alert_type = body.get('type', 'info')
+    ticker = body.get('ticker', 'NDX')
+    price = body.get('price', '')
+    direction = body.get('direction', '')
+    timeframe = body.get('timeframe', '')
+    
+    # Handle TradingView raw text format
+    if not title and body.get('text'):
+        raw_text = body['text']
+        title = raw_text[:100] if len(raw_text) > 100 else raw_text
+        message = raw_text
+    
+    # Handle Pipedream passthrough format
+    if not title and body.get('alert'):
+        title = body['alert']
+    
+    # Auto-detect alert type from content
+    if not alert_type or alert_type == 'info':
+        combined = (title + ' ' + message + ' ' + direction).lower()
+        if any(w in combined for w in ['bullish', 'long', 'buy', 'bounce', 'breakout', 'support', 'reversal up']):
+            alert_type = 'bullish'
+        elif any(w in combined for w in ['bearish', 'short', 'sell', 'breakdown', 'resistance', 'reversal down']):
+            alert_type = 'bearish'
+    
+    # Build rich message with metadata
+    meta_parts = []
+    if price:
+        meta_parts.append(f"Price: {price}")
+    if direction:
+        meta_parts.append(f"Direction: {direction.upper()}")
+    if timeframe:
+        meta_parts.append(f"Timeframe: {timeframe}")
+    if meta_parts and message:
+        message = message + '\n' + ' | '.join(meta_parts)
+    elif meta_parts:
+        message = ' | '.join(meta_parts)
+    
+    if not title:
+        title = f"NDX Alert"
+    
     alert = {
         'id': str(uuid.uuid4()),
-        'title': body.get('title', 'Webhook Alert'),
-        'message': body.get('message', ''),
-        'type': body.get('type', 'info'),
-        'ticker': body.get('ticker', ''),
-        'severity': body.get('severity', 'medium'),
-        'created_by': 'Webhook',
-        'created_at': datetime.now(timezone.utc).isoformat()
+        'title': title,
+        'message': message or title,
+        'type': alert_type,
+        'ticker': ticker,
+        'severity': body.get('severity', 'high'),
+        'source': 'pipedream',
+        'price': str(price) if price else '',
+        'direction': direction,
+        'timeframe': timeframe,
+        'created_by': 'TradingView',
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'raw_payload': json.dumps(body)
     }
     await db.alerts.insert_one(alert)
+    logger.info(f"Webhook alert received: {title}")
     return {'status': 'ok', 'alert_id': alert['id']}
 
 # =====================
@@ -473,8 +648,9 @@ async def broadcast_alert(data: AlertCreate, user=Depends(get_admin_user)):
         'title': data.title,
         'message': data.message,
         'type': data.type,
-        'ticker': data.ticker,
+        'ticker': data.ticker or 'NDX',
         'severity': 'high',
+        'source': 'admin',
         'created_by': user['username'],
         'created_at': datetime.now(timezone.utc).isoformat(),
         'is_broadcast': True
