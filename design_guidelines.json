@@ -1,0 +1,156 @@
+{
+  "branding": {
+    "app_name": "NDX Command",
+    "theme": "dark",
+    "primary_color": "#00C805",
+    "secondary_color": "#FF5000",
+    "background_color": "#000000",
+    "surface_color": "#1C1C1E",
+    "text_primary": "#FFFFFF",
+    "text_secondary": "#A1A1AA",
+    "accent_color": "#0A84FF",
+    "border_color": "#27272A",
+    "success": "#00C805",
+    "error": "#FF5000",
+    "warning": "#FFD60A",
+    "info": "#0A84FF"
+  },
+  "typography": {
+    "font_family_heading": "System",
+    "font_family_body": "System",
+    "font_family_mono": "System",
+    "scale": {
+      "xs": 12,
+      "sm": 14,
+      "base": 16,
+      "lg": 18,
+      "xl": 20,
+      "2xl": 24,
+      "3xl": 30,
+      "4xl": 36
+    },
+    "weights": {
+      "regular": "400",
+      "medium": "500",
+      "semibold": "600",
+      "bold": "700"
+    }
+  },
+  "layout": {
+    "spacing": {
+      "1": 4,
+      "2": 8,
+      "3": 12,
+      "4": 16,
+      "5": 20,
+      "6": 24,
+      "8": 32,
+      "10": 40,
+      "12": 48
+    },
+    "radius": {
+      "sm": 4,
+      "md": 8,
+      "lg": 12,
+      "xl": 16,
+      "full": 9999
+    },
+    "container_padding": 16
+  },
+  "components": {
+    "buttons": {
+      "primary": {
+        "backgroundColor": "#00C805",
+        "paddingVertical": 12,
+        "paddingHorizontal": 24,
+        "borderRadius": 9999,
+        "alignItems": "center",
+        "justifyContent": "center"
+      },
+      "secondary": {
+        "backgroundColor": "#27272A",
+        "paddingVertical": 12,
+        "paddingHorizontal": 24,
+        "borderRadius": 9999,
+        "alignItems": "center",
+        "justifyContent": "center"
+      },
+      "text_style": {
+        "color": "#000000",
+        "fontWeight": "600",
+        "fontSize": 16
+      }
+    },
+    "inputs": {
+      "default": {
+        "backgroundColor": "#1C1C1E",
+        "borderColor": "#27272A",
+        "borderWidth": 1,
+        "borderRadius": 8,
+        "padding": 12,
+        "color": "#FFFFFF",
+        "fontSize": 16
+      },
+      "focused": {
+        "borderColor": "#00C805"
+      }
+    },
+    "cards": {
+      "container": {
+        "backgroundColor": "#1C1C1E",
+        "borderRadius": 12,
+        "padding": 16,
+        "marginBottom": 12
+      },
+      "header": {
+        "flexDirection": "row",
+        "justifyContent": "space-between",
+        "alignItems": "center",
+        "marginBottom": 8
+      }
+    },
+    "charts": {
+      "container": {
+        "height": 250,
+        "backgroundColor": "#1C1C1E",
+        "borderRadius": 12,
+        "overflow": "hidden",
+        "marginVertical": 12
+      },
+      "webview_style": {
+        "backgroundColor": "transparent",
+        "flex": 1
+      }
+    }
+  },
+  "image_urls": {
+    "login_background": "https://images.unsplash.com/photo-1451187580459-43490279c0fa?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHwyfHx0ZWNobm9sb2d5JTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3NzMzMjMxNDZ8MA&ixlib=rb-4.1.0&q=85",
+    "news_header": "https://images.unsplash.com/photo-1579548122080-c35fd6820ecb?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHwzfHx0ZWNobm9sb2d5JTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3NzMzMjMxNDZ8MA&ixlib=rb-4.1.0&q=85",
+    "chart_placeholder": "https://images.pexels.com/photos/35118208/pexels-photo-35118208.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+    "market_overview": "https://images.pexels.com/photos/210607/pexels-photo-210607.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+  },
+  "instructions_to_main_agent": [
+    "Use React Native StyleSheet.create() for all styles. Do not use CSS files.",
+    "Use 'expo-router' for navigation. Create screens in the 'app/' directory.",
+    "Use '@expo/vector-icons' (Ionicons or Feather) for icons.",
+    "For charts, use 'react-native-webview' to render a lightweight HTML/JS chart (e.g., TradingView Lightweight Charts) or a native library if simpler.",
+    "Ensure all touch targets are at least 44x44 points.",
+    "Dark mode is default. Hardcode dark colors or use a custom theme provider if dynamic switching is needed (but user preferred dark default).",
+    "Use the 'primary_color' (#00C805) for positive price changes and 'secondary_color' (#FF5000) for negative price changes.",
+    "For the 'NDX Command' feel, keep the UI minimal. Avoid gradients unless subtle.",
+    "For Authentication, use JWT stored in SecureStore.",
+    "For Backend, ensure FastAPI endpoints return JSON that matches the frontend data structures.",
+    "Use 'FlatList' for lists (Alerts, News, Stocks) for performance.",
+    "Add 'data-testid' to all interactive elements for testing.",
+    "Stock Cards should show: Ticker, Price (Large), % Change (Color coded), and a mini sparkline if possible (or just the numbers).",
+    "News Feed should use the 'news_header' image as a parallax header if possible, or just a clean list."
+  ],
+  "universal_guidelines": [
+    "Mobile-first design principles apply strictly.",
+    "Avoid clutter. Show only essential data on the main dashboard.",
+    "Use skeleton loaders for data fetching states.",
+    "Error handling must be graceful (toast notifications or inline errors).",
+    "All text must be readable against the dark background (ensure contrast > 4.5:1).",
+    "Use 'SafeAreaView' to handle notches and home indicators."
+  ]
+}
