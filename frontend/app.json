@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/ndx-logo.png",
     "scheme": "frontend",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
@@ -21,8 +21,10 @@
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "backgroundColor": "#000000"
     },
+    "backgroundColor": "#000000",
     "plugins": [
       "expo-router",
       [

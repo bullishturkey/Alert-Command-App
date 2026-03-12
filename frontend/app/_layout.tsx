@@ -1,7 +1,7 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { StatusBar } from 'expo-status-bar';
-import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import { useEffect } from 'react';
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -22,7 +22,8 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   if (isLoading) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator size="large" color="#00C805" />
+        <Image source={require('../assets/ndx-logo.png')} style={styles.splashLogo} resizeMode="contain" />
+        <ActivityIndicator size="large" color="#00C805" style={styles.spinner} />
       </View>
     );
   }
@@ -51,4 +52,6 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   loading: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
+  splashLogo: { width: 120, height: 120, borderRadius: 24 },
+  spinner: { marginTop: 24 },
 });
