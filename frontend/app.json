@@ -23,6 +23,10 @@
       "edgeToEdgeEnabled": true,
       "permissions": ["RECEIVE_BOOT_COMPLETED", "VIBRATE"]
     },
+    "androidStatusBar": {
+      "backgroundColor": "#000000",
+      "barStyle": "light-content"
+    },
     "web": {
       "bundler": "metro",
       "output": "static",
