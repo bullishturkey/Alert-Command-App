@@ -1,5 +1,6 @@
 """NDX Command - Trading Intelligence Platform Backend"""
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Body, Query
+from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -1212,6 +1213,140 @@ async def get_stats(user=Depends(get_admin_user)):
 # === INCLUDE ROUTER & MIDDLEWARE ===
 app.include_router(api_router)
 app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# =====================
+# LEGAL PAGES (Public)
+# =====================
+PRIVACY_POLICY_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NDX Command - Privacy Policy</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:800px;margin:0 auto;padding:24px;background:#0a0a0a;color:#e0e0e0;line-height:1.7}
+h1{color:#00C805;font-size:28px;margin-bottom:4px}
+h2{color:#00C805;font-size:18px;margin-top:32px;border-bottom:1px solid #222;padding-bottom:8px}
+p,li{font-size:14px;color:#b0b0b0}
+.updated{font-size:12px;color:#666;margin-bottom:32px}
+a{color:#00C805}
+</style>
+</head>
+<body>
+<h1>Privacy Policy</h1>
+<p class="updated">Last updated: April 2026</p>
+
+<h2>1. Introduction</h2>
+<p>NDX Command ("we", "our", "the App") is a trading intelligence platform that provides market data, alerts, and educational content for the Nasdaq-100 trading community. We respect your privacy and are committed to protecting your personal information.</p>
+
+<h2>2. Information We Collect</h2>
+<p><strong>Account Information:</strong> When you register, we collect your email address, username, and a securely hashed password.</p>
+<p><strong>Usage Data:</strong> We collect information about how you interact with the App, including watchlist preferences and alert settings.</p>
+<p><strong>Push Notification Tokens:</strong> If you enable push notifications, we store your device's push token to deliver trade alerts.</p>
+<p>We do <strong>not</strong> collect financial account credentials, brokerage data, or payment information.</p>
+
+<h2>3. How We Use Your Information</h2>
+<ul>
+<li>To provide and maintain the App's core functionality (market data, alerts, charts)</li>
+<li>To send push notifications for trade alerts you have opted into</li>
+<li>To personalize your experience (custom watchlists)</li>
+<li>To improve the App through aggregated, anonymized usage analytics</li>
+</ul>
+
+<h2>4. Data Sharing</h2>
+<p>We do <strong>not</strong> sell, trade, or rent your personal information to third parties. We may share data with:</p>
+<ul>
+<li><strong>Service Providers:</strong> Finnhub (market data), Expo (push notifications), and AI providers (anonymized market analysis) — only as needed to operate the App.</li>
+</ul>
+
+<h2>5. Data Storage & Security</h2>
+<p>Your data is stored on secure, encrypted servers. Passwords are hashed using bcrypt and are never stored in plain text. We use JWT tokens for secure authentication.</p>
+
+<h2>6. Your Rights</h2>
+<p>You may request deletion of your account and associated data at any time by contacting us. You can disable push notifications through your device settings.</p>
+
+<h2>7. Third-Party Services</h2>
+<p>The App integrates with third-party market data providers (Finnhub, Yahoo Finance). These services have their own privacy policies that govern their data practices.</p>
+
+<h2>8. Children's Privacy</h2>
+<p>The App is not intended for users under 18 years of age. We do not knowingly collect information from minors.</p>
+
+<h2>9. Changes to This Policy</h2>
+<p>We may update this Privacy Policy from time to time. Changes will be posted within the App.</p>
+
+<h2>10. Contact</h2>
+<p>For privacy-related questions, contact us through the App's support channels.</p>
+</body>
+</html>"""
+
+TERMS_OF_SERVICE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NDX Command - Terms of Service</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:800px;margin:0 auto;padding:24px;background:#0a0a0a;color:#e0e0e0;line-height:1.7}
+h1{color:#00C805;font-size:28px;margin-bottom:4px}
+h2{color:#00C805;font-size:18px;margin-top:32px;border-bottom:1px solid #222;padding-bottom:8px}
+p,li{font-size:14px;color:#b0b0b0}
+.updated{font-size:12px;color:#666;margin-bottom:32px}
+a{color:#00C805}
+.warning{background:#1a1200;border:1px solid #332200;border-radius:8px;padding:12px 16px;margin:16px 0}
+.warning p{color:#ffcc00;font-size:13px}
+</style>
+</head>
+<body>
+<h1>Terms of Service</h1>
+<p class="updated">Last updated: April 2026</p>
+
+<div class="warning"><p><strong>⚠️ Disclaimer:</strong> NDX Command is an informational tool only. Nothing in this App constitutes financial advice. Always consult a licensed financial advisor before making investment decisions.</p></div>
+
+<h2>1. Acceptance of Terms</h2>
+<p>By using NDX Command, you agree to be bound by these Terms of Service. If you do not agree, do not use the App.</p>
+
+<h2>2. Description of Service</h2>
+<p>NDX Command provides real-time market data, trade alerts, AI-powered market analysis, educational content, and community tools for Nasdaq-100 traders.</p>
+
+<h2>3. No Financial Advice</h2>
+<p>All market data, AI sentiment analysis, suggested trends, and alerts provided by the App are for <strong>informational and educational purposes only</strong>. They do not constitute investment advice, financial advice, or trading recommendations.</p>
+
+<h2>4. User Accounts</h2>
+<p>You are responsible for maintaining the confidentiality of your account credentials. You must provide accurate information during registration.</p>
+
+<h2>5. Acceptable Use</h2>
+<p>You agree not to misuse the App, including but not limited to: reverse engineering, unauthorized access, distributing malware, or using the App for illegal purposes.</p>
+
+<h2>6. Market Data</h2>
+<p>Market data is provided by third-party sources (Finnhub, Yahoo Finance) and may be delayed or inaccurate. We do not guarantee the accuracy, completeness, or timeliness of any market data.</p>
+
+<h2>7. Limitation of Liability</h2>
+<p>NDX Command shall not be liable for any financial losses, damages, or other liabilities arising from your use of the App or reliance on information provided within it.</p>
+
+<h2>8. Termination</h2>
+<p>We reserve the right to terminate or suspend your account at our discretion, without notice, for conduct that we believe violates these Terms.</p>
+
+<h2>9. Changes to Terms</h2>
+<p>We may modify these Terms at any time. Continued use of the App after changes constitutes acceptance of the updated Terms.</p>
+
+<h2>10. Contact</h2>
+<p>For questions about these Terms, contact us through the App's support channels.</p>
+</body>
+</html>"""
+
+@app.get("/privacy-policy", response_class=HTMLResponse)
+async def privacy_policy():
+    return PRIVACY_POLICY_HTML
+
+@app.get("/terms-of-service", response_class=HTMLResponse)
+async def terms_of_service():
+    return TERMS_OF_SERVICE_HTML
+
+@app.get("/api/privacy-policy", response_class=HTMLResponse)
+async def api_privacy_policy():
+    return PRIVACY_POLICY_HTML
+
+@app.get("/api/terms-of-service", response_class=HTMLResponse)
+async def api_terms_of_service():
+    return TERMS_OF_SERVICE_HTML
 
 # === STARTUP ===
 @app.on_event("startup")
