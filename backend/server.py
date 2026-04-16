@@ -30,6 +30,8 @@ FINNHUB_KEY = os.environ.get('FINNHUB_API_KEY', '')
 JWT_SECRET = os.environ.get('JWT_SECRET', 'ndx-command-jwt-secret-2026-secure')
 WEBHOOK_SECRET = os.environ.get('WEBHOOK_SECRET', '')
 
+EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+
 # === APP SETUP ===
 app = FastAPI(title="NDX Command API")
 api_router = APIRouter(prefix="/api")
@@ -701,7 +703,7 @@ async def add_economic_event(body: dict = Body(...), user=Depends(get_admin_user
 async def get_alerts(user=Depends(get_current_user)):
     """Get NDX trading alerts - only from webhook pipeline and admin"""
     alerts = await db.alerts.find(
-        {'source': {'$in': ['webhook', 'pipedream', 'tradingview', 'admin']}},
+        {'source': {'$in': ['webhook', 'pipedream', 'tradingview', 'admin', 'signal']}},
         {'_id': 0}
     ).sort('created_at', -1).to_list(100)
     return {'alerts': alerts}
@@ -732,12 +734,9 @@ async def delete_alert(alert_id: str, user=Depends(get_admin_user)):
 @api_router.post("/alerts/webhook")
 async def webhook_alert(body: dict = Body(...)):
     """
-    Webhook for TradingView → Pipedream → NDX Command.
+    Webhook endpoint for incoming trade signals.
     
-    Your Pipedream sends the TradingView alert text as "content".
-    This is typically the NDX price point at time of alert.
-    
-    Expected payload from Pipedream:
+    Expected payload:
     {"content": "24,580.50"}  or  {"content": "NDX at 24,580 - support bounce"}
     
     Also accepts:
@@ -769,9 +768,9 @@ async def webhook_alert(body: dict = Body(...)):
         'type': 'signal',
         'ticker': 'NDX',
         'severity': 'high',
-        'source': 'pipedream',
+        'source': 'webhook',
         'price': price,
-        'created_by': 'TradingView',
+        'created_by': 'NDX Command',
         'created_at': datetime.now(timezone.utc).isoformat(),
     }
     await db.alerts.insert_one(alert)
@@ -1015,6 +1014,160 @@ async def get_multi_quotes(symbols: str = '', user=Depends(get_current_user)):
         quote['sparkline'] = generate_mock_sparkline(sym)
         quotes.append(quote)
     return {'quotes': quotes}
+
+@api_router.put("/alerts/{alert_id}")
+async def update_alert(alert_id: str, body: dict = Body(...), user=Depends(get_admin_user)):
+    """Admin: Update an existing alert"""
+    update_fields = {}
+    if 'title' in body:
+        update_fields['title'] = body['title']
+    if 'message' in body:
+        update_fields['message'] = body['message']
+    if 'type' in body:
+        update_fields['type'] = body['type']
+    if 'ticker' in body:
+        update_fields['ticker'] = body['ticker']
+    if 'severity' in body:
+        update_fields['severity'] = body['severity']
+    if not update_fields:
+        raise HTTPException(status_code=400, detail='No fields to update')
+    update_fields['updated_at'] = datetime.now(timezone.utc).isoformat()
+    update_fields['updated_by'] = user['username']
+    result = await db.alerts.update_one({'id': alert_id}, {'$set': update_fields})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail='Alert not found')
+    updated = await db.alerts.find_one({'id': alert_id}, {'_id': 0})
+    return updated
+
+# =====================
+# AI SENTIMENT ANALYSIS
+# =====================
+_ai_sentiment_cache: Dict[str, Any] = {}
+_ai_sentiment_cache_time: float = 0
+AI_SENTIMENT_CACHE_TTL = 300  # 5 minutes
+
+@api_router.get("/ai/sentiment")
+async def get_ai_sentiment(user=Depends(get_current_user)):
+    """AI-powered market sentiment analysis using Claude"""
+    global _ai_sentiment_cache, _ai_sentiment_cache_time
+    import time as _time
+    now = _time.time()
+    
+    # Return cached result if fresh
+    if now - _ai_sentiment_cache_time < AI_SENTIMENT_CACHE_TTL and _ai_sentiment_cache:
+        return _ai_sentiment_cache
+    
+    if not EMERGENT_LLM_KEY:
+        return {'error': 'AI service not configured', 'sentiment': None}
+    
+    try:
+        # Gather context: NDX quote + breaking news
+        ndx_quote = await fetch_ndx_quote()
+        finnhub_news = await fetch_finnhub_news()
+        
+        # Build news summary for Claude
+        news_text = ""
+        if finnhub_news:
+            for item in finnhub_news[:8]:
+                headline = item.get('headline', '')
+                source = item.get('source', 'Unknown')
+                summary = item.get('summary', '')[:150]
+                news_text += f"- [{source}] {headline}. {summary}\n"
+        else:
+            for item in MOCK_NEWS[:8]:
+                news_text += f"- [{item['source']}] {item['headline']}. {item['summary'][:150]}\n"
+        
+        ndx_info = ""
+        if ndx_quote:
+            ndx_info = f"NDX (Nasdaq 100) is currently at ${ndx_quote.get('price', 'N/A')}, change: {ndx_quote.get('change', 0)} ({ndx_quote.get('changePercent', 0)}%). Open: ${ndx_quote.get('open', 'N/A')}, High: ${ndx_quote.get('high', 'N/A')}, Low: ${ndx_quote.get('low', 'N/A')}."
+        
+        # Call Claude via emergentintegrations
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"ndx-sentiment-{datetime.now(timezone.utc).strftime('%Y%m%d%H')}",
+            system_message="""You are a senior market analyst for a Nasdaq-100 (NDX) trading community. 
+Your job is to analyze breaking financial news and market data to produce a concise, actionable market intelligence brief.
+
+IMPORTANT: Respond ONLY with valid JSON in this exact format:
+{
+  "overall_sentiment": "bullish" | "bearish" | "neutral",
+  "confidence": 1-10,
+  "summary": "2-3 sentence market overview",
+  "key_drivers": ["driver 1", "driver 2", "driver 3"],
+  "ndx_outlook": "1-2 sentence NDX-specific analysis with key levels",
+  "risk_factors": ["risk 1", "risk 2"],
+  "trade_bias": "A brief actionable suggestion for NDX traders"
+}
+
+Be direct, professional, and trading-focused. No disclaimers or caveats."""
+        )
+        chat.with_model("anthropic", "claude-4-sonnet-20250514")
+        
+        user_message = UserMessage(
+            text=f"""Analyze the following market data and news for the NDX trading community:
+
+MARKET DATA:
+{ndx_info}
+
+BREAKING NEWS:
+{news_text}
+
+Provide your JSON analysis."""
+        )
+        
+        response = await chat.send_message(user_message)
+        
+        # Parse the JSON response
+        try:
+            # Try to extract JSON from response
+            resp_text = response.strip()
+            if resp_text.startswith('```'):
+                resp_text = resp_text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
+            sentiment_data = json.loads(resp_text)
+        except json.JSONDecodeError:
+            # If parsing fails, create a structured response from the text
+            sentiment_data = {
+                'overall_sentiment': 'neutral',
+                'confidence': 5,
+                'summary': response[:300] if response else 'Analysis unavailable',
+                'key_drivers': [],
+                'ndx_outlook': '',
+                'risk_factors': [],
+                'trade_bias': ''
+            }
+        
+        result = {
+            'sentiment': sentiment_data,
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'ndx_price': ndx_quote.get('price') if ndx_quote else None,
+            'ndx_change': ndx_quote.get('changePercent') if ndx_quote else None,
+            'news_count': len(finnhub_news) if finnhub_news else 0,
+        }
+        
+        # Cache the result
+        _ai_sentiment_cache = result
+        _ai_sentiment_cache_time = now
+        
+        logger.info(f"AI sentiment generated: {sentiment_data.get('overall_sentiment', 'unknown')}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"AI sentiment error: {e}")
+        return {
+            'error': str(e),
+            'sentiment': {
+                'overall_sentiment': 'neutral',
+                'confidence': 0,
+                'summary': 'AI analysis temporarily unavailable. Please try again shortly.',
+                'key_drivers': [],
+                'ndx_outlook': '',
+                'risk_factors': [],
+                'trade_bias': ''
+            },
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+        }
 
 # =====================
 # ADMIN ENDPOINTS

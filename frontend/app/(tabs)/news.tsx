@@ -11,6 +11,15 @@ interface EconomicEvent {
 }
 interface Earning { symbol: string; date: string; hour: string; epsEstimate: number | null; revenueEstimate: number | null; }
 interface NewsItem { id: string; headline: string; source: string; summary: string; sentiment: string; url: string; timestamp: string; }
+interface AISentiment {
+  overall_sentiment: string;
+  confidence: number;
+  summary: string;
+  key_drivers: string[];
+  ndx_outlook: string;
+  risk_factors: string[];
+  trade_bias: string;
+}
 
 const IMPACT = { high: { color: colors.red, bg: colors.redBg, label: 'HIGH' }, medium: { color: colors.yellow, bg: colors.yellowBg, label: 'MED' }, low: { color: colors.textSecondary, bg: 'rgba(161,161,170,0.08)', label: 'LOW' } } as Record<string, any>;
 const CAT_ICON: Record<string, string> = { fed: 'business', inflation: 'trending-up', employment: 'people', economic: 'bar-chart' };
@@ -37,30 +46,164 @@ export default function PreflightScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  const [aiSentiment, setAiSentiment] = useState<AISentiment | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [aiExpanded, setAiExpanded] = useState(true);
+  const [ndxPrice, setNdxPrice] = useState<number | null>(null);
+  const [ndxChange, setNdxChange] = useState<number | null>(null);
 
   const fetchData = useCallback(async () => {
     try { const d = await apiFetch('/api/preflight'); setEvents(d.economic_events || []); setEarnings(d.earnings || []); setNews(d.breaking_news || []); }
     catch (e) { console.error(e); } finally { setLoading(false); setRefreshing(false); }
   }, []);
 
-  useEffect(() => { fetchData(); const i = setInterval(fetchData, 60000); return () => clearInterval(i); }, [fetchData]);
+  const fetchAISentiment = useCallback(async () => {
+    setAiLoading(true);
+    setAiError('');
+    try {
+      const data = await apiFetch('/api/ai/sentiment');
+      if (data.sentiment) {
+        setAiSentiment(data.sentiment);
+        if (data.ndx_price) setNdxPrice(data.ndx_price);
+        if (data.ndx_change !== undefined) setNdxChange(data.ndx_change);
+      }
+      if (data.error && !data.sentiment?.summary) {
+        setAiError(data.error);
+      }
+    } catch (e: any) {
+      setAiError('Failed to load AI analysis');
+      console.error('AI sentiment error:', e);
+    } finally {
+      setAiLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchData(); fetchAISentiment(); const i = setInterval(fetchData, 60000); return () => clearInterval(i); }, [fetchData, fetchAISentiment]);
 
   const toggleExpand = (i: number) => setExpanded(p => ({ ...p, [i]: !p[i] }));
 
   if (loading) return <View style={st.ctr}><ActivityIndicator size="large" color={colors.green} /></View>;
 
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const sentColor = aiSentiment ? (SENT_COLOR[aiSentiment.overall_sentiment] || colors.textSecondary) : colors.textSecondary;
 
   return (
     <SafeAreaView style={st.safe} edges={['top']}>
       <FlatList data={[1]} keyExtractor={() => 'pf'}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={colors.green} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); fetchAISentiment(); }} tintColor={colors.green} />}
         showsVerticalScrollIndicator={false}
         renderItem={() => (
           <View style={st.content}>
             <View style={st.header}>
               <View><View style={st.hRow}><Text style={st.prefix}>⟩</Text><Text style={st.title}>Preflight</Text></View><Text style={st.dateTxt}>{today}</Text></View>
               <View style={st.badge}><Ionicons name="airplane" size={13} color={colors.blue} /><Text style={st.badgeTxt}>DAILY BRIEF</Text></View>
+            </View>
+
+            {/* AI Sentiment Card */}
+            <View style={st.section}>
+              <TouchableOpacity style={st.secHead} onPress={() => setAiExpanded(!aiExpanded)} activeOpacity={0.7}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="sparkles" size={16} color={colors.green} />
+                  <Text style={st.secTitle}>AI Market Intelligence</Text>
+                </View>
+                <Ionicons name={aiExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+
+              {aiExpanded && (
+                <View style={st.aiCard}>
+                  {aiLoading ? (
+                    <View style={st.aiLoadingWrap}>
+                      <ActivityIndicator size="small" color={colors.green} />
+                      <Text style={st.aiLoadingTxt}>Analyzing market conditions...</Text>
+                    </View>
+                  ) : aiSentiment ? (
+                    <>
+                      {/* Sentiment Header */}
+                      <View style={st.aiHeader}>
+                        <View style={[st.aiSentBadge, { backgroundColor: sentColor + '18', borderColor: sentColor + '30' }]}>
+                          <Ionicons
+                            name={aiSentiment.overall_sentiment === 'bullish' ? 'arrow-up-circle' : aiSentiment.overall_sentiment === 'bearish' ? 'arrow-down-circle' : 'remove-circle'}
+                            size={18} color={sentColor}
+                          />
+                          <Text style={[st.aiSentTxt, { color: sentColor }]}>{(aiSentiment.overall_sentiment || 'NEUTRAL').toUpperCase()}</Text>
+                          <View style={[st.aiConfBadge, { backgroundColor: sentColor + '25' }]}>
+                            <Text style={[st.aiConfTxt, { color: sentColor }]}>{aiSentiment.confidence}/10</Text>
+                          </View>
+                        </View>
+                        {ndxPrice && (
+                          <View style={st.aiNdxWrap}>
+                            <Text style={st.aiNdxLabel}>NDX</Text>
+                            <Text style={st.aiNdxPrice}>${ndxPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}</Text>
+                            {ndxChange !== null && <Text style={[st.aiNdxChg, { color: ndxChange >= 0 ? colors.green : colors.red }]}>{ndxChange >= 0 ? '+' : ''}{ndxChange.toFixed(2)}%</Text>}
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Summary */}
+                      <Text style={st.aiSummary}>{aiSentiment.summary}</Text>
+
+                      {/* NDX Outlook */}
+                      {aiSentiment.ndx_outlook ? (
+                        <View style={st.aiOutlook}>
+                          <View style={st.aiOutlookHeader}>
+                            <Ionicons name="trending-up" size={13} color={colors.green} />
+                            <Text style={st.aiOutlookTitle}>NDX Outlook</Text>
+                          </View>
+                          <Text style={st.aiOutlookTxt}>{aiSentiment.ndx_outlook}</Text>
+                        </View>
+                      ) : null}
+
+                      {/* Key Drivers */}
+                      {aiSentiment.key_drivers && aiSentiment.key_drivers.length > 0 && (
+                        <View style={st.aiDrivers}>
+                          <Text style={st.aiSectionLabel}>KEY DRIVERS</Text>
+                          {aiSentiment.key_drivers.map((d, i) => (
+                            <View key={i} style={st.aiDriverRow}>
+                              <View style={st.aiDriverDot} />
+                              <Text style={st.aiDriverTxt}>{d}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                      {/* Risk Factors */}
+                      {aiSentiment.risk_factors && aiSentiment.risk_factors.length > 0 && (
+                        <View style={st.aiRisks}>
+                          <Text style={st.aiSectionLabel}>RISK FACTORS</Text>
+                          {aiSentiment.risk_factors.map((r, i) => (
+                            <View key={i} style={st.aiRiskRow}>
+                              <Ionicons name="warning" size={11} color={colors.yellow} />
+                              <Text style={st.aiRiskTxt}>{r}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                      {/* Trade Bias */}
+                      {aiSentiment.trade_bias ? (
+                        <View style={[st.aiTradeBias, { borderColor: sentColor + '30' }]}>
+                          <Ionicons name="bulb" size={14} color={colors.yellow} />
+                          <Text style={st.aiTradeBiasTxt}>{aiSentiment.trade_bias}</Text>
+                        </View>
+                      ) : null}
+
+                      <TouchableOpacity style={st.aiRefreshBtn} onPress={fetchAISentiment}>
+                        <Ionicons name="refresh" size={12} color={colors.textMuted} />
+                        <Text style={st.aiRefreshTxt}>Refresh Analysis</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : aiError ? (
+                    <View style={st.aiErrorWrap}>
+                      <Ionicons name="alert-circle" size={20} color={colors.yellow} />
+                      <Text style={st.aiErrorTxt}>{aiError}</Text>
+                      <TouchableOpacity style={st.aiRetryBtn} onPress={fetchAISentiment}>
+                        <Text style={st.aiRetryTxt}>Retry</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
+                </View>
+              )}
             </View>
 
             {/* Economic Calendar - Expandable */}
@@ -74,7 +217,7 @@ export default function PreflightScreen() {
                   const lt = fmtTime(ev.time_utc, ev.time);
                   const ld = fmtDate(ev.date);
                   const sent = ev.sentiment || guessSentiment(ev);
-                  const sentColor = SENT_COLOR[sent] || colors.textSecondary;
+                  const sentColorEv = SENT_COLOR[sent] || colors.textSecondary;
                   const isExp = expanded[i] === true;
                   return (
                     <TouchableOpacity key={i} style={[st.eventCard, td && st.eventToday]} onPress={() => toggleExpand(i)} activeOpacity={0.7}>
@@ -84,9 +227,9 @@ export default function PreflightScreen() {
                           <View style={st.eventTopRow}>
                             <Text style={st.eventName} numberOfLines={1}>{ev.event}</Text>
                             <View style={{ flexDirection: 'row', gap: 4 }}>
-                              <View style={[st.sentBadge, { backgroundColor: sentColor + '18' }]}>
-                                <Ionicons name={sent === 'bullish' ? 'arrow-up' : sent === 'bearish' ? 'arrow-down' : 'remove'} size={9} color={sentColor} />
-                                <Text style={[st.sentTxt, { color: sentColor }]}>{sent.toUpperCase()}</Text>
+                              <View style={[st.sentBadge, { backgroundColor: sentColorEv + '18' }]}>
+                                <Ionicons name={sent === 'bullish' ? 'arrow-up' : sent === 'bearish' ? 'arrow-down' : 'remove'} size={9} color={sentColorEv} />
+                                <Text style={[st.sentTxt, { color: sentColorEv }]}>{sent.toUpperCase()}</Text>
                               </View>
                               <View style={[st.impBadge, { backgroundColor: imp.bg }]}><Text style={[st.impTxt, { color: imp.color }]}>{imp.label}</Text></View>
                             </View>
@@ -99,7 +242,6 @@ export default function PreflightScreen() {
                           </View>
                         </View>
                       </View>
-                      {/* Expanded details */}
                       {isExp && (
                         <View style={st.expandedArea}>
                           {ev.description ? <Text style={st.expandDesc}>{ev.description}</Text> : null}
@@ -170,10 +312,46 @@ const st = StyleSheet.create({
   badge: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.blueBg, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 100, gap: 5, borderWidth: 1, borderColor: 'rgba(10,132,255,0.12)' },
   badgeTxt: { color: colors.blue, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
   section: { marginBottom: 24 },
-  secHead: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, marginBottom: 12, gap: 8 },
+  secHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 12, gap: 8 },
   secTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
   emptyS: { marginHorizontal: 20, backgroundColor: colors.surface, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: colors.border },
   emptySTxt: { color: colors.textTertiary, fontSize: 13, textAlign: 'center' },
+
+  // AI Sentiment Card
+  aiCard: { marginHorizontal: 20, backgroundColor: colors.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: 'rgba(0,200,5,0.15)' },
+  aiLoadingWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 20, justifyContent: 'center' },
+  aiLoadingTxt: { color: colors.textSecondary, fontSize: 13 },
+  aiHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  aiSentBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 100, borderWidth: 1 },
+  aiSentTxt: { fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+  aiConfBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  aiConfTxt: { fontSize: 10, fontWeight: '800' },
+  aiNdxWrap: { alignItems: 'flex-end' },
+  aiNdxLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
+  aiNdxPrice: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  aiNdxChg: { fontSize: 11, fontWeight: '700' },
+  aiSummary: { color: colors.textSecondary, fontSize: 13, lineHeight: 20, marginBottom: 12 },
+  aiOutlook: { backgroundColor: colors.bg, borderRadius: 10, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: colors.borderSubtle },
+  aiOutlookHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  aiOutlookTitle: { color: colors.green, fontSize: 11, fontWeight: '800', letterSpacing: 0.3 },
+  aiOutlookTxt: { color: colors.textSecondary, fontSize: 12, lineHeight: 18 },
+  aiDrivers: { marginBottom: 12 },
+  aiSectionLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 0.8, marginBottom: 6 },
+  aiDriverRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 4 },
+  aiDriverDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: colors.green, marginTop: 5 },
+  aiDriverTxt: { color: colors.textSecondary, fontSize: 12, flex: 1, lineHeight: 17 },
+  aiRisks: { marginBottom: 12 },
+  aiRiskRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 4 },
+  aiRiskTxt: { color: colors.textTertiary, fontSize: 12, flex: 1, lineHeight: 17 },
+  aiTradeBias: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: 'rgba(255,214,10,0.05)', borderRadius: 10, padding: 12, borderWidth: 1, marginBottom: 12 },
+  aiTradeBiasTxt: { color: colors.textSecondary, fontSize: 12, flex: 1, lineHeight: 17, fontWeight: '600' },
+  aiRefreshBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'center', paddingVertical: 6, paddingHorizontal: 12 },
+  aiRefreshTxt: { color: colors.textMuted, fontSize: 10, fontWeight: '600' },
+  aiErrorWrap: { alignItems: 'center', paddingVertical: 16, gap: 8 },
+  aiErrorTxt: { color: colors.textTertiary, fontSize: 12, textAlign: 'center' },
+  aiRetryBtn: { backgroundColor: colors.greenBg, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 100, borderWidth: 1, borderColor: 'rgba(0,200,5,0.15)' },
+  aiRetryTxt: { color: colors.green, fontSize: 12, fontWeight: '700' },
+
   // Economic Events - expandable
   eventCard: { backgroundColor: colors.surface, marginHorizontal: 20, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
   eventToday: { borderColor: 'rgba(255,214,10,0.25)' },

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, TextInput, Modal, Alert } from 'react-native';
+import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, TextInput, Modal, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiFetch, timeAgo } from '../../utils/api';
@@ -7,7 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { colors, spacing, radius } from '../../theme';
 
 interface AlertItem {
-  id: string; title: string; message: string; type: string; ticker: string; price: string; source: string; created_by: string; created_at: string;
+  id: string; title: string; message: string; type: string; ticker: string; price: string; source: string; created_by: string; created_at: string; severity?: string;
 }
 
 export default function AlertsScreen() {
@@ -17,7 +17,12 @@ export default function AlertsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editAlert, setEditAlert] = useState<AlertItem | null>(null);
+  const [newTitle, setNewTitle] = useState('');
   const [newMsg, setNewMsg] = useState('');
+  const [newTicker, setNewTicker] = useState('NDX');
+  const [newSeverity, setNewSeverity] = useState('high');
   const [sending, setSending] = useState(false);
 
   const fetchAlerts = useCallback(async () => {
@@ -45,9 +50,40 @@ export default function AlertsScreen() {
     setSending(true);
     try {
       await apiFetch('/api/alerts/webhook', { method: 'POST', body: JSON.stringify({ content: newMsg.trim() }) });
-      setNewMsg(''); setShowCreate(false); fetchAlerts();
+      resetForm(); setShowCreate(false); fetchAlerts();
     } catch (e: any) { Alert.alert('Error', e.message || 'Failed to send'); }
     finally { setSending(false); }
+  };
+
+  const updateAlert = async () => {
+    if (!editAlert) return;
+    setSending(true);
+    try {
+      await apiFetch(`/api/alerts/${editAlert.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          title: newTitle.trim() || editAlert.title,
+          message: newMsg.trim() || editAlert.message,
+          ticker: newTicker.trim(),
+          severity: newSeverity,
+        }),
+      });
+      resetForm(); setShowEdit(false); setEditAlert(null); fetchAlerts();
+    } catch (e: any) { Alert.alert('Error', e.message || 'Failed to update'); }
+    finally { setSending(false); }
+  };
+
+  const openEditModal = (alert: AlertItem) => {
+    setEditAlert(alert);
+    setNewTitle(alert.title);
+    setNewMsg(alert.message);
+    setNewTicker(alert.ticker || 'NDX');
+    setNewSeverity(alert.severity || 'high');
+    setShowEdit(true);
+  };
+
+  const resetForm = () => {
+    setNewTitle(''); setNewMsg(''); setNewTicker('NDX'); setNewSeverity('high');
   };
 
   const renderAlert = ({ item, index }: { item: AlertItem; index: number }) => {
@@ -59,18 +95,74 @@ export default function AlertsScreen() {
           <Text style={st.cardTime}>{timeAgo(item.created_at)}</Text>
         </View>
         <View style={st.priceRow}>
-          <Text style={st.ndxL}>NDX</Text><Text style={st.at}>@</Text>
+          <Text style={st.ndxL}>{item.ticker || 'NDX'}</Text><Text style={st.at}>@</Text>
           <Text style={st.priceV}>{item.price || item.message}</Text>
         </View>
         {item.message && item.message !== item.title && item.message !== item.price && <Text style={st.cardMsg}>{item.message}</Text>}
         <View style={st.cardBot}>
-          <View style={st.srcRow}><Ionicons name="pulse" size={11} color={colors.textMuted} /><Text style={st.srcTxt}>{item.created_by || 'TradingView'}</Text></View>
-          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+          <View style={st.srcRow}><Ionicons name="pulse" size={11} color={colors.textMuted} /><Text style={st.srcTxt}>{item.created_by || 'NDX Command'}</Text></View>
+          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
             {newest && <View style={st.newBadge}><Text style={st.newTxt}>NEW</Text></View>}
-            {isAdmin && <TouchableOpacity onPress={() => confirmDelete(item)} style={st.delBtn}><Ionicons name="trash-outline" size={14} color={colors.red} /></TouchableOpacity>}
+            {isAdmin && (
+              <>
+                <TouchableOpacity onPress={() => openEditModal(item)} style={st.editBtn}><Ionicons name="pencil-outline" size={13} color={colors.blue} /></TouchableOpacity>
+                <TouchableOpacity onPress={() => confirmDelete(item)} style={st.delBtn}><Ionicons name="trash-outline" size={13} color={colors.red} /></TouchableOpacity>
+              </>
+            )}
           </View>
         </View>
       </View>
+    );
+  };
+
+  // Create/Edit Modal
+  const renderModal = (isEdit: boolean) => {
+    const visible = isEdit ? showEdit : showCreate;
+    const onClose = () => { isEdit ? setShowEdit(false) : setShowCreate(false); resetForm(); setEditAlert(null); };
+    const onSubmit = isEdit ? updateAlert : sendManualAlert;
+    const title = isEdit ? 'Edit Alert' : 'Send Alert';
+
+    return (
+      <Modal visible={visible} transparent animationType="fade">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+          <View style={st.modalOv}>
+            <View style={st.modalCard}>
+              <Text style={st.modalTitle}>{title}</Text>
+              <Text style={st.modalSub}>{isEdit ? 'Update alert details' : 'Push to all registered devices'}</Text>
+              <ScrollView keyboardShouldPersistTaps="handled">
+                {isEdit && (
+                  <>
+                    <Text style={st.fieldLabel}>Title</Text>
+                    <TextInput style={st.modalInput} value={newTitle} onChangeText={setNewTitle} placeholder="Alert title" placeholderTextColor={colors.textMuted} />
+                  </>
+                )}
+                <Text style={st.fieldLabel}>{isEdit ? 'Message' : 'Alert Content'}</Text>
+                <TextInput style={[st.modalInput, { minHeight: 60 }]} value={newMsg} onChangeText={setNewMsg} placeholder={isEdit ? "Alert message" : "NDX @ 24,580 - support bounce"} placeholderTextColor={colors.textMuted} multiline />
+                {isEdit && (
+                  <>
+                    <Text style={st.fieldLabel}>Ticker</Text>
+                    <TextInput style={st.modalInput} value={newTicker} onChangeText={setNewTicker} placeholder="NDX" placeholderTextColor={colors.textMuted} autoCapitalize="characters" />
+                    <Text style={st.fieldLabel}>Severity</Text>
+                    <View style={st.sevRow}>
+                      {['high', 'medium', 'low'].map(s => (
+                        <TouchableOpacity key={s} style={[st.sevBtn, newSeverity === s && st.sevBtnActive]} onPress={() => setNewSeverity(s)}>
+                          <Text style={[st.sevTxt, newSeverity === s && st.sevTxtActive]}>{s.toUpperCase()}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
+                )}
+              </ScrollView>
+              <View style={st.modalActions}>
+                <TouchableOpacity style={st.modalCancel} onPress={onClose}><Text style={st.modalCancelTxt}>Cancel</Text></TouchableOpacity>
+                <TouchableOpacity style={[st.modalSend, (!newMsg.trim() || sending) && { opacity: 0.5 }]} onPress={onSubmit} disabled={!newMsg.trim() || sending}>
+                  {sending ? <ActivityIndicator size="small" color="#000" /> : <Text style={st.modalSendTxt}>{isEdit ? 'Update' : 'Send Alert'}</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     );
   };
 
@@ -78,30 +170,16 @@ export default function AlertsScreen() {
 
   return (
     <SafeAreaView style={st.safe} edges={['top']}>
-      {/* Create Alert Modal */}
-      <Modal visible={showCreate} transparent animationType="fade">
-        <View style={st.modalOv}>
-          <View style={st.modalCard}>
-            <Text style={st.modalTitle}>Send Manual Alert</Text>
-            <Text style={st.modalSub}>This will push to all registered devices</Text>
-            <TextInput style={st.modalInput} value={newMsg} onChangeText={setNewMsg} placeholder="NDX @ 24,580 - support bounce" placeholderTextColor={colors.textMuted} multiline />
-            <View style={st.modalActions}>
-              <TouchableOpacity style={st.modalCancel} onPress={() => setShowCreate(false)}><Text style={st.modalCancelTxt}>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity style={[st.modalSend, (!newMsg.trim() || sending) && { opacity: 0.5 }]} onPress={sendManualAlert} disabled={!newMsg.trim() || sending}>
-                {sending ? <ActivityIndicator size="small" color="#000" /> : <Text style={st.modalSendTxt}>Send Alert</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {renderModal(false)}
+      {renderModal(true)}
 
       <View style={st.header}>
         <View>
           <View style={st.hRow}><Text style={st.prefix}>⟩</Text><Text style={st.title}>NDX Alerts</Text></View>
-          <Text style={st.sub}>TradingView → Pipedream Pipeline</Text>
+          <Text style={st.sub}>Real-time Trade Signals</Text>
         </View>
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-          {isAdmin && <TouchableOpacity style={st.addBtn} onPress={() => setShowCreate(true)}><Ionicons name="add" size={18} color={colors.green} /><Text style={st.addTxt}>Send</Text></TouchableOpacity>}
+          {isAdmin && <TouchableOpacity style={st.addBtn} onPress={() => { resetForm(); setShowCreate(true); }}><Ionicons name="add" size={18} color={colors.green} /><Text style={st.addTxt}>Send</Text></TouchableOpacity>}
           <View style={st.live}><View style={st.liveDot} /><Text style={st.liveTxt}>LIVE</Text></View>
         </View>
       </View>
@@ -109,7 +187,7 @@ export default function AlertsScreen() {
       <FlatList data={alerts} keyExtractor={i => i.id} renderItem={renderAlert} contentContainerStyle={st.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchAlerts(); }} tintColor={colors.green} />}
         showsVerticalScrollIndicator={false}
-        ListEmptyComponent={<View style={st.empty}><View style={st.emptyIcon}><Ionicons name="flash-outline" size={48} color={colors.textMuted} /></View><Text style={st.emptyTitle}>Waiting for Signals</Text><Text style={st.emptyTxt}>When TradingView conditions are met, NDX price alerts will appear here.</Text></View>}
+        ListEmptyComponent={<View style={st.empty}><View style={st.emptyIcon}><Ionicons name="flash-outline" size={48} color={colors.textMuted} /></View><Text style={st.emptyTitle}>Waiting for Signals</Text><Text style={st.emptyTxt}>Trade alerts and signals will appear here in real-time.</Text></View>}
       />
     </SafeAreaView>
   );
@@ -138,16 +216,23 @@ const st = StyleSheet.create({
   srcRow: { flexDirection: 'row', alignItems: 'center', gap: 4 }, srcTxt: { color: colors.textMuted, fontSize: 10 },
   newBadge: { backgroundColor: colors.greenBg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 100, borderWidth: 1, borderColor: 'rgba(0,200,5,0.15)' },
   newTxt: { color: colors.green, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
+  editBtn: { width: 28, height: 28, borderRadius: 7, backgroundColor: colors.blueBg, justifyContent: 'center', alignItems: 'center' },
   delBtn: { width: 28, height: 28, borderRadius: 7, backgroundColor: colors.redBg, justifyContent: 'center', alignItems: 'center' },
   empty: { alignItems: 'center', paddingTop: 80, paddingHorizontal: 40, gap: 12 },
   emptyIcon: { width: 80, height: 80, borderRadius: 20, backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border },
   emptyTitle: { color: '#fff', fontSize: 17, fontWeight: '700' }, emptyTxt: { color: colors.textTertiary, fontSize: 13, textAlign: 'center', lineHeight: 19 },
   // Modal
   modalOv: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 24 },
-  modalCard: { backgroundColor: colors.surface, borderRadius: 16, padding: 24, width: '100%', maxWidth: 360, borderWidth: 1, borderColor: colors.border },
+  modalCard: { backgroundColor: colors.surface, borderRadius: 16, padding: 24, width: '100%', maxWidth: 360, borderWidth: 1, borderColor: colors.border, maxHeight: '80%' },
   modalTitle: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 4 },
   modalSub: { color: colors.textTertiary, fontSize: 12, marginBottom: 16 },
-  modalInput: { backgroundColor: colors.bg, borderRadius: 8, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 12, color: '#fff', fontSize: 15, minHeight: 60 },
+  fieldLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 0.3, marginBottom: 6, marginTop: 12 },
+  modalInput: { backgroundColor: colors.bg, borderRadius: 8, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 12, color: '#fff', fontSize: 15 },
+  sevRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  sevBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: colors.bg, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  sevBtnActive: { backgroundColor: colors.greenBg, borderColor: colors.green },
+  sevTxt: { color: colors.textMuted, fontSize: 11, fontWeight: '700' },
+  sevTxtActive: { color: colors.green },
   modalActions: { flexDirection: 'row', gap: 12, marginTop: 20 },
   modalCancel: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: colors.surfaceHover, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
   modalCancelTxt: { color: colors.textSecondary, fontSize: 15, fontWeight: '600' },

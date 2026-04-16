@@ -28,7 +28,7 @@ export default function TabLayout() {
       },
       tabBarActiveTintColor: colors.green,
       tabBarInactiveTintColor: colors.textMuted,
-      tabBarLabelStyle: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
+      tabBarLabelStyle: { fontSize: 9, fontWeight: '700', letterSpacing: 0.3 },
     }}>
       <Tabs.Screen name="index" options={{
         title: 'Markets',
@@ -49,6 +49,10 @@ export default function TabLayout() {
       <Tabs.Screen name="learn" options={{
         title: 'Onboard',
         tabBarIcon: ({ color, size }) => <Ionicons name="play-circle" size={size} color={color} />,
+      }} />
+      <Tabs.Screen name="settings" options={{
+        title: 'Settings',
+        tabBarIcon: ({ color, size }) => <Ionicons name="settings-outline" size={size} color={color} />,
       }} />
     </Tabs>
   );
