@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { View, StyleSheet, ActivityIndicator, Image, Platform } from 'react-native';
 import { useEffect } from 'react';
 import { colors } from '../theme';
+import { useNotifications } from '../hooks/useNotifications';
 
 // Global locale fix for web - must run before any Intl usage
 if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -42,6 +43,9 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+
+  // Register for push notifications when authenticated
+  useNotifications(!!user);
 
   useEffect(() => {
     if (isLoading) return;

@@ -9,14 +9,19 @@
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Scan QR codes for quick stock lookups",
+        "UIBackgroundModes": ["remote-notification"]
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": ["RECEIVE_BOOT_COMPLETED", "VIBRATE"]
     },
     "web": {
       "bundler": "metro",
@@ -27,6 +32,13 @@
     "backgroundColor": "#000000",
     "plugins": [
       "expo-router",
+      [
+        "expo-notifications",
+        {
+          "color": "#00C805",
+          "sounds": []
+        }
+      ],
       [
         "expo-splash-screen",
         {

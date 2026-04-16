@@ -769,7 +769,67 @@ async def webhook_alert(body: dict = Body(...)):
     }
     await db.alerts.insert_one(alert)
     logger.info(f"Webhook alert received: {title}")
+    
+    # Send push notifications to all registered devices
+    await send_push_notifications(title, content or title, alert['id'])
+    
     return {'status': 'ok', 'alert_id': alert['id']}
+
+# =====================
+# PUSH NOTIFICATION ENDPOINTS
+# =====================
+async def send_push_notifications(title: str, body: str, alert_id: str = ''):
+    """Send push notifications to all registered devices via Expo"""
+    try:
+        from exponent_server_sdk import PushClient, PushMessage, PushServerError
+        tokens = await db.push_tokens.find({}, {'_id': 0, 'token': 1}).to_list(1000)
+        if not tokens:
+            return
+        messages = []
+        for doc in tokens:
+            token = doc.get('token', '')
+            if not token:
+                continue
+            messages.append(PushMessage(
+                to=token,
+                title=title,
+                body=body[:200],
+                data={'type': 'alert', 'alert_id': alert_id},
+                sound='default',
+                priority='high',
+            ))
+        if messages:
+            client = PushClient()
+            try:
+                responses = client.publish_multiple(messages)
+                logger.info(f"Push notifications sent: {len(responses)} devices")
+            except PushServerError as e:
+                logger.error(f"Push server error: {e}")
+            except Exception as e:
+                logger.error(f"Push send error: {e}")
+    except ImportError:
+        logger.warning("exponent_server_sdk not installed, skipping push")
+    except Exception as e:
+        logger.error(f"Push notification error: {e}")
+
+@api_router.post("/notifications/register")
+async def register_push_token(body: dict = Body(...), user=Depends(get_current_user)):
+    token = body.get('token', '').strip()
+    if not token:
+        raise HTTPException(status_code=400, detail='Push token is required')
+    # Upsert: one token per user, update if exists
+    await db.push_tokens.update_one(
+        {'user_id': user['id']},
+        {'$set': {'user_id': user['id'], 'token': token, 'updated_at': datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    logger.info(f"Push token registered for user {user['username']}")
+    return {'status': 'registered'}
+
+@api_router.post("/notifications/unregister")
+async def unregister_push_token(user=Depends(get_current_user)):
+    await db.push_tokens.delete_many({'user_id': user['id']})
+    return {'status': 'unregistered'}
 
 # =====================
 # CHAT ENDPOINTS
