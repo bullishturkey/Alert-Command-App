@@ -1,109 +1,56 @@
-# NDX Command - Trading Intelligence Platform
+# NDX Command - Product Requirements Document
 
-## Product Requirements Document (PRD)
+## Overview
+NDX Command is a mobile-first trading intelligence platform designed for a trading community focused on NDX and major Nasdaq-100 stocks. It replaces the current workflow (Discord alerts → Pipedream automation) into a single streamlined app.
 
-### Overview
-NDX Command is a mobile-first trading intelligence platform built for a trading community focused on NDX (Nasdaq 100) and major Nasdaq-100 stocks. It replaces the workflow of Discord alerts → Pipedream automation → TradingView console → manual notifications.
+## Completed Features
 
-### Tech Stack
-- **Frontend**: React Native (Expo SDK 54) with Expo Router
+### Core Platform (v1.0)
+- ✅ JWT Authentication (Login/Register/Logout)
+- ✅ Real-time Dashboard with live NDX quotes (yfinance, 5s refresh)
+- ✅ 10 Nasdaq-100 stock tracking via Finnhub API
+- ✅ Interactive candlestick charts with multiple timeframes (1m, 5m, 15m, 1H, 1D)
+- ✅ TradingView → Pipedream webhook integration for trade alerts
+- ✅ Community Chat with 5 themed channels
+- ✅ Preflight Tab (Economic Calendar + Earnings + Breaking News)
+- ✅ Admin Panel for user management and broadcast alerts
+- ✅ Custom NDX logo integration across app
+
+### UI/UX (v2.0 - openclaw.ai Inspired Redesign)
+- ✅ Complete UI overhaul inspired by openclaw.ai aesthetic
+- ✅ Green accent color (#00C805) throughout
+- ✅ Premium dark theme with subtle borders and surfaces
+- ✅ "⟩" section header prefix styling (openclaw.ai signature)
+- ✅ Shared design system (/theme/index.ts) for consistency
+- ✅ Glowing green borders on NDX hero card
+- ✅ Pill-shaped badges and refined card designs
+- ✅ Updated chart colors to match new palette
+
+### Bug Fixes
+- ✅ Preflight timezone conversion (UTC → local time display)
+- ✅ Loading screen black background (no white flash)
+- ✅ Volume display removed (Finnhub free tier limitation)
+
+## In Progress
+
+### Video Hosting / Teaching Videos
+- Design database schema and endpoints for video content
+- Frontend UI for subscribers to watch educational content
+
+### AI Agent (News Sentiment & NDX Trends)
+- Claude integration via Emergent LLM key
+- Analyze Finnhub news for AI-powered sentiment summaries
+- NDX suggested trends analysis in Preflight area
+
+## Future Tasks (Backlog)
+- Push Notifications (Firebase Cloud Messaging)
+- Broker API Integrations (Schwab, Alpaca, IBKR)
+- Conversational AI Trading Assistant
+- Admin Chat Announcements / Broadcasting
+
+## Technical Stack
+- **Frontend**: React Native (Expo) + Expo Router
 - **Backend**: FastAPI (Python)
 - **Database**: MongoDB
-- **Charts**: TradingView Lightweight Charts (via WebView/iframe)
-- **Market Data**: Finnhub API (free tier) with mock data fallback
-- **Auth**: JWT-based authentication
-
-### Phase 1 — MVP Features (Implemented)
-
-#### 1. Authentication
-- JWT-based login/register
-- Admin user seeded: `admin@ndxcommand.com` / `admin123`
-- Token persisted with AsyncStorage
-- Auth guard on protected routes
-
-#### 2. Real-Time Market Dashboard
-- **Tracked tickers**: NDX, QQQ, NVDA, MSFT, AAPL, AMZN, META, TSLA, AMD, AVGO, GOOGL
-- Shows: live price, % change, volume, sentiment
-- Market sentiment indicator (Bullish/Bearish/Mixed)
-- Pull-to-refresh, auto-refresh every 30 seconds
-- Tap stock card → navigates to detailed stock view
-
-#### 3. Live Charting
-- Full chart view using TradingView Lightweight Charts
-- Symbol picker for all tracked stocks
-- Timeframes: 1m, 5m, 15m, 1H, 1D
-- Candlestick chart with volume histogram
-- Indicator labels: VWAP, RSI, MA 20, MA 50
-
-#### 4. Alert System
-- In-app alert feed with color-coded types (bullish/bearish/neutral/info)
-- Severity indicators (high/medium/low)
-- Admin can create alerts from admin panel
-- TradingView webhook endpoint: `POST /api/alerts/webhook`
-- Seeded sample alerts for demo
-
-#### 5. Breaking Market News Feed
-- News articles with sentiment analysis (bullish/bearish/neutral)
-- Category filters: All, Macro, Tech, Earnings, Market
-- Source attribution, ticker tags, timestamps
-- Finnhub API integration with mock data fallback
-
-#### 6. Community Messaging
-- 5 channels: General Market Chat, NDX Alerts, Trade Ideas, Macro News, Admin Announcements
-- Real-time messaging with polling (5s interval)
-- User avatars and timestamps
-- Own messages aligned right (blue), others left
-
-#### 7. Admin Panel
-- Dashboard stats (users, alerts, messages)
-- Create and broadcast alerts
-- User management (view all users)
-- Admin-only access (shield icon on dashboard)
-
-### API Endpoints
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | /api/auth/register | Register new user |
-| POST | /api/auth/login | Login |
-| GET | /api/auth/me | Get current user |
-| GET | /api/market/quotes | Get all stock quotes |
-| GET | /api/market/quote/{symbol} | Get single quote |
-| GET | /api/market/candles/{symbol} | Get candle data |
-| GET | /api/news | Get market news |
-| GET | /api/alerts | Get all alerts |
-| POST | /api/alerts | Create alert (admin) |
-| POST | /api/alerts/webhook | Webhook alert |
-| GET | /api/chat/channels | List channels |
-| GET | /api/chat/messages/{id} | Get messages |
-| POST | /api/chat/messages/{id} | Send message |
-| GET | /api/admin/stats | Admin stats |
-| GET | /api/admin/users | List users |
-| POST | /api/admin/broadcast | Broadcast alert |
-
-### Phase 2 — Trading Integration (Architecture Ready)
-- Broker API integration: Charles Schwab, Alpaca, Interactive Brokers
-- Trade execution: options spreads, calls, puts, shares
-- OAuth broker authentication
-- Encrypted account tokens
-
-### Phase 3 — AI Trading Assistant (Future)
-- Conversational AI (Claude integration planned)
-- Natural language trade execution
-- Position monitoring and exit suggestions
-- Risk profile analysis
-
-### Data Sources
-- **Market Data**: Mock data by default (realistic simulation). Set `FINNHUB_API_KEY` in backend .env for real data.
-- **News**: Mock curated news. Set `FINNHUB_API_KEY` for real news.
-
-### Environment Variables
-**Backend (.env)**:
-- `MONGO_URL` - MongoDB connection
-- `JWT_SECRET` - JWT signing secret
-- `FINNHUB_API_KEY` - Optional: Finnhub free API key
-
-### Design
-- Dark mode default
-- Robinhood/TradingView inspired UI
-- Green (#00C805) for bullish, Red (#FF5000) for bearish
-- 5-tab navigation: Markets, Charts, Alerts, News, Chat
+- **Market Data**: Finnhub API + yfinance (NDX)
+- **Charts**: TradingView Lightweight Charts
