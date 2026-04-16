@@ -102,7 +102,13 @@ export default function DashboardScreen() {
       await apiFetch('/api/watchlist/add', { method: 'POST', body: JSON.stringify({ symbol: sym }) });
       setNewSymbol('');
       setShowAddModal(false);
-      await fetchWatchlist();
+      const wlData = await apiFetch('/api/watchlist');
+      const updatedSymbols = wlData.symbols || [];
+      setWatchlist(updatedSymbols);
+      // Immediately fetch quotes for the updated watchlist
+      const symbolsParam = updatedSymbols.join(',');
+      const qData = await apiFetch(`/api/market/quote-multi?symbols=${symbolsParam}`);
+      setQuotes(qData.quotes || []);
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Failed to add symbol');
     } finally {
@@ -169,7 +175,7 @@ export default function DashboardScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Add to Watchlist</Text>
-            <Text style={styles.modalSubtitle}>Enter a stock ticker symbol</Text>
+            <Text style={styles.modalSubtitle}>Enter a ticker or pick from suggestions</Text>
             <TextInput
               style={styles.modalInput}
               value={newSymbol}
@@ -180,6 +186,33 @@ export default function DashboardScreen() {
               autoFocus
               maxLength={10}
             />
+            {/* Ticker Suggestions */}
+            <View style={styles.suggestionsWrap}>
+              {[
+                { sym: 'NFLX', name: 'Netflix' },
+                { sym: 'COST', name: 'Costco' },
+                { sym: 'CRM', name: 'Salesforce' },
+                { sym: 'INTC', name: 'Intel' },
+                { sym: 'PYPL', name: 'PayPal' },
+                { sym: 'UBER', name: 'Uber' },
+                { sym: 'COIN', name: 'Coinbase' },
+                { sym: 'HOOD', name: 'Robinhood' },
+                { sym: 'SQ', name: 'Block' },
+                { sym: 'PLTR', name: 'Palantir' },
+                { sym: 'SNOW', name: 'Snowflake' },
+                { sym: 'SHOP', name: 'Shopify' },
+                { sym: 'MSTR', name: 'MicroStrat' },
+                { sym: 'SPOT', name: 'Spotify' },
+                { sym: 'PANW', name: 'Palo Alto' },
+              ].filter(s => !watchlist.includes(s.sym) && (
+                !newSymbol.trim() || s.sym.includes(newSymbol.toUpperCase()) || s.name.toUpperCase().includes(newSymbol.toUpperCase())
+              )).slice(0, 8).map(s => (
+                <TouchableOpacity key={s.sym} style={styles.suggestionChip} onPress={() => setNewSymbol(s.sym)}>
+                  <Text style={styles.suggestionSym}>{s.sym}</Text>
+                  <Text style={styles.suggestionName}>{s.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.modalCancelBtn} onPress={() => { setShowAddModal(false); setNewSymbol(''); }}>
                 <Text style={styles.modalCancelText}>Cancel</Text>
@@ -366,6 +399,10 @@ const styles = StyleSheet.create({
   modalTitle: { color: colors.textPrimary, fontSize: 18, fontWeight: '700', marginBottom: 4 },
   modalSubtitle: { color: colors.textTertiary, fontSize: 13, marginBottom: spacing.lg },
   modalInput: { backgroundColor: colors.bg, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 14, color: colors.textPrimary, fontSize: 18, fontWeight: '700', letterSpacing: 1, textAlign: 'center' },
+  suggestionsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: spacing.md },
+  suggestionChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surfaceHover, paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.pill, gap: 4, borderWidth: 1, borderColor: colors.border },
+  suggestionSym: { color: colors.green, fontSize: 12, fontWeight: '800' },
+  suggestionName: { color: colors.textMuted, fontSize: 10, fontWeight: '500' },
   modalActions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.xl },
   modalCancelBtn: { flex: 1, paddingVertical: 14, borderRadius: radius.md, backgroundColor: colors.surfaceHover, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
   modalCancelText: { color: colors.textSecondary, fontSize: 15, fontWeight: '600' },

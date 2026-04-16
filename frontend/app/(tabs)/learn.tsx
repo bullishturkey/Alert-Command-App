@@ -251,7 +251,7 @@ iframe{width:100vw;height:100vh;border:none}</style></head>
         <View>
           <View style={styles.headerTitleRow}>
             <Text style={styles.sectionPrefix}>⟩</Text>
-            <Text style={styles.title}>Learn</Text>
+            <Text style={styles.title}>Onboard</Text>
           </View>
           <Text style={styles.subtitle}>{videos.length} video{videos.length !== 1 ? 's' : ''} available</Text>
         </View>
