@@ -1,321 +1,341 @@
 #!/usr/bin/env python3
 """
-NDX Command Trading Intelligence Platform - Backend API Testing
-Tests all backend endpoints as specified in the review request.
+NDX Command Backend API Testing - NEW Endpoints
+Testing the newly implemented Watchlist, Videos, and Quote Multi endpoints
 """
 
 import requests
 import json
-import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 
-# Get backend URL from environment
-BACKEND_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', 'https://nasdaq-command.preview.emergentagent.com').rstrip('/')
-API_BASE = f"{BACKEND_URL}/api"
-
-# Test credentials from test_credentials.md
+# Configuration
+BASE_URL = "https://nasdaq-command.preview.emergentagent.com/api"
 ADMIN_EMAIL = "admin@ndxcommand.com"
 ADMIN_PASSWORD = "admin123"
 
-class NDXCommandAPITester:
+class NDXCommandTester:
     def __init__(self):
         self.session = requests.Session()
-        self.session.headers.update({"Content-Type": "application/json"})
-        self.admin_token = None
+        self.auth_token = None
         self.test_results = []
         
-    def log_result(self, test_name, success, message, response_data=None):
+    def log_result(self, test_name, success, details="", response_data=None):
         """Log test result"""
         status = "✅ PASS" if success else "❌ FAIL"
-        print(f"{status} {test_name}: {message}")
-        self.test_results.append({
+        result = {
             'test': test_name,
-            'success': success,
-            'message': message,
-            'response_data': response_data
-        })
+            'status': status,
+            'details': details,
+            'timestamp': datetime.now().isoformat()
+        }
+        if response_data:
+            result['response_sample'] = response_data
+        self.test_results.append(result)
+        print(f"{status} {test_name}: {details}")
         
-    def test_auth_login(self):
-        """Test 1: Auth Flow - POST /api/auth/login"""
-        print("\n=== Testing Auth Flow ===")
+    def authenticate(self):
+        """Step 1: Authenticate and get JWT token"""
+        print("\n=== AUTHENTICATION TEST ===")
         try:
-            response = self.session.post(f"{API_BASE}/auth/login", json={
+            response = self.session.post(f"{BASE_URL}/auth/login", json={
                 "email": ADMIN_EMAIL,
                 "password": ADMIN_PASSWORD
             })
             
             if response.status_code == 200:
                 data = response.json()
-                if 'token' in data and 'user' in data:
-                    self.admin_token = data['token']
-                    self.session.headers.update({"Authorization": f"Bearer {self.admin_token}"})
-                    self.log_result("Auth Login", True, f"Login successful, token received, user: {data['user']['email']}")
+                self.auth_token = data.get('token')
+                user = data.get('user', {})
+                
+                if self.auth_token and user.get('is_admin'):
+                    self.session.headers.update({'Authorization': f'Bearer {self.auth_token}'})
+                    self.log_result("Auth Login", True, 
+                                  f"Admin login successful. User: {user.get('email')}, Admin: {user.get('is_admin')}")
                     return True
                 else:
-                    self.log_result("Auth Login", False, "Response missing token or user data", data)
+                    self.log_result("Auth Login", False, "Missing token or admin privileges")
+                    return False
             else:
                 self.log_result("Auth Login", False, f"HTTP {response.status_code}: {response.text}")
+                return False
                 
         except Exception as e:
             self.log_result("Auth Login", False, f"Exception: {str(e)}")
-        return False
+            return False
+    
+    def test_watchlist_endpoints(self):
+        """Test NEW Watchlist endpoints"""
+        print("\n=== WATCHLIST ENDPOINTS TEST ===")
         
-    def test_market_ndx(self):
-        """Test 2: Market Data - GET /api/market/ndx"""
-        print("\n=== Testing NDX Market Data ===")
+        # Test 1: GET /api/watchlist - should return default symbols (10 stocks)
         try:
-            response = self.session.get(f"{API_BASE}/market/ndx")
-            
+            response = self.session.get(f"{BASE_URL}/watchlist")
             if response.status_code == 200:
                 data = response.json()
-                required_fields = ['symbol', 'name', 'price', 'change', 'changePercent', 'timestamp']
-                missing_fields = [field for field in required_fields if field not in data]
-                
-                if not missing_fields:
-                    self.log_result("NDX Market Data", True, 
-                                  f"NDX quote received: {data['symbol']} @ ${data['price']} ({data['changePercent']:+.2f}%)")
-                    return True
+                symbols = data.get('symbols', [])
+                if len(symbols) == 10:
+                    self.log_result("Watchlist GET (Default)", True, 
+                                  f"Retrieved {len(symbols)} default symbols: {symbols[:3]}...")
                 else:
-                    self.log_result("NDX Market Data", False, f"Missing fields: {missing_fields}", data)
+                    self.log_result("Watchlist GET (Default)", False, 
+                                  f"Expected 10 symbols, got {len(symbols)}")
             else:
-                self.log_result("NDX Market Data", False, f"HTTP {response.status_code}: {response.text}")
-                
+                self.log_result("Watchlist GET (Default)", False, 
+                              f"HTTP {response.status_code}: {response.text}")
         except Exception as e:
-            self.log_result("NDX Market Data", False, f"Exception: {str(e)}")
-        return False
+            self.log_result("Watchlist GET (Default)", False, f"Exception: {str(e)}")
         
-    def test_market_quotes(self):
-        """Test 3: Market Quotes - GET /api/market/quotes"""
-        print("\n=== Testing Market Quotes ===")
+        # Test 2: POST /api/watchlist/add - add NFLX
         try:
-            response = self.session.get(f"{API_BASE}/market/quotes")
-            
+            response = self.session.post(f"{BASE_URL}/watchlist/add", json={"symbol": "NFLX"})
             if response.status_code == 200:
                 data = response.json()
-                if 'quotes' in data and len(data['quotes']) > 0:
-                    quotes_count = len(data['quotes'])
-                    symbols = [q['symbol'] for q in data['quotes'][:5]]  # First 5 symbols
-                    self.log_result("Market Quotes", True, 
-                                  f"Retrieved {quotes_count} quotes: {', '.join(symbols)}...")
-                    return True
+                if data.get('status') == 'added' and data.get('symbol') == 'NFLX':
+                    self.log_result("Watchlist ADD NFLX", True, "NFLX added successfully")
                 else:
-                    self.log_result("Market Quotes", False, "No quotes in response", data)
+                    self.log_result("Watchlist ADD NFLX", False, f"Unexpected response: {data}")
             else:
-                self.log_result("Market Quotes", False, f"HTTP {response.status_code}: {response.text}")
-                
+                self.log_result("Watchlist ADD NFLX", False, 
+                              f"HTTP {response.status_code}: {response.text}")
         except Exception as e:
-            self.log_result("Market Quotes", False, f"Exception: {str(e)}")
-        return False
+            self.log_result("Watchlist ADD NFLX", False, f"Exception: {str(e)}")
         
-    def test_preflight(self):
-        """Test 4: Preflight - GET /api/preflight"""
-        print("\n=== Testing Preflight Data ===")
+        # Test 3: GET /api/watchlist - should now include NFLX (11 symbols)
         try:
-            response = self.session.get(f"{API_BASE}/preflight")
-            
+            response = self.session.get(f"{BASE_URL}/watchlist")
             if response.status_code == 200:
                 data = response.json()
-                required_sections = ['economic_events', 'earnings', 'breaking_news']
-                missing_sections = [section for section in required_sections if section not in data]
-                
-                if not missing_sections:
-                    # Check for time_utc field in economic events
-                    events_with_time_utc = 0
-                    for event in data.get('economic_events', []):
-                        if 'time_utc' in event:
-                            events_with_time_utc += 1
-                    
-                    events_count = len(data['economic_events'])
-                    earnings_count = len(data['earnings'])
-                    news_count = len(data['breaking_news'])
-                    
-                    message = f"Preflight data: {events_count} events ({events_with_time_utc} with time_utc), {earnings_count} earnings, {news_count} news"
-                    self.log_result("Preflight Data", True, message)
-                    
-                    # Verify time_utc format if present
-                    if events_with_time_utc > 0:
-                        sample_event = next(e for e in data['economic_events'] if 'time_utc' in e)
-                        try:
-                            datetime.fromisoformat(sample_event['time_utc'].replace('Z', '+00:00'))
-                            self.log_result("Preflight Time UTC", True, f"time_utc field format valid: {sample_event['time_utc']}")
-                        except ValueError:
-                            self.log_result("Preflight Time UTC", False, f"Invalid time_utc format: {sample_event['time_utc']}")
-                    
-                    return True
+                symbols = data.get('symbols', [])
+                if len(symbols) == 11 and 'NFLX' in symbols:
+                    self.log_result("Watchlist GET (After Add)", True, 
+                                  f"Now has {len(symbols)} symbols including NFLX")
                 else:
-                    self.log_result("Preflight Data", False, f"Missing sections: {missing_sections}", data)
+                    self.log_result("Watchlist GET (After Add)", False, 
+                                  f"Expected 11 symbols with NFLX, got {len(symbols)}, NFLX present: {'NFLX' in symbols}")
             else:
-                self.log_result("Preflight Data", False, f"HTTP {response.status_code}: {response.text}")
-                
+                self.log_result("Watchlist GET (After Add)", False, 
+                              f"HTTP {response.status_code}: {response.text}")
         except Exception as e:
-            self.log_result("Preflight Data", False, f"Exception: {str(e)}")
-        return False
+            self.log_result("Watchlist GET (After Add)", False, f"Exception: {str(e)}")
         
-    def test_alerts(self):
-        """Test 5: Alerts - GET /api/alerts"""
-        print("\n=== Testing Alerts ===")
+        # Test 4: POST /api/watchlist/remove - remove NFLX
         try:
-            response = self.session.get(f"{API_BASE}/alerts")
-            
+            response = self.session.post(f"{BASE_URL}/watchlist/remove", json={"symbol": "NFLX"})
             if response.status_code == 200:
                 data = response.json()
-                if 'alerts' in data:
-                    alerts_count = len(data['alerts'])
-                    if alerts_count > 0:
-                        sample_alert = data['alerts'][0]
-                        required_fields = ['id', 'title', 'message', 'type', 'severity', 'created_at']
-                        missing_fields = [field for field in required_fields if field not in sample_alert]
+                if data.get('status') == 'removed' and data.get('symbol') == 'NFLX':
+                    self.log_result("Watchlist REMOVE NFLX", True, "NFLX removed successfully")
+                else:
+                    self.log_result("Watchlist REMOVE NFLX", False, f"Unexpected response: {data}")
+            else:
+                self.log_result("Watchlist REMOVE NFLX", False, 
+                              f"HTTP {response.status_code}: {response.text}")
+        except Exception as e:
+            self.log_result("Watchlist REMOVE NFLX", False, f"Exception: {str(e)}")
+        
+        # Test 5: GET /api/watchlist - should be back to 10 symbols
+        try:
+            response = self.session.get(f"{BASE_URL}/watchlist")
+            if response.status_code == 200:
+                data = response.json()
+                symbols = data.get('symbols', [])
+                if len(symbols) == 10 and 'NFLX' not in symbols:
+                    self.log_result("Watchlist GET (After Remove)", True, 
+                                  f"Back to {len(symbols)} symbols, NFLX removed")
+                else:
+                    self.log_result("Watchlist GET (After Remove)", False, 
+                                  f"Expected 10 symbols without NFLX, got {len(symbols)}, NFLX present: {'NFLX' in symbols}")
+            else:
+                self.log_result("Watchlist GET (After Remove)", False, 
+                              f"HTTP {response.status_code}: {response.text}")
+        except Exception as e:
+            self.log_result("Watchlist GET (After Remove)", False, f"Exception: {str(e)}")
+    
+    def test_videos_endpoints(self):
+        """Test NEW Videos endpoints"""
+        print("\n=== VIDEOS ENDPOINTS TEST ===")
+        
+        # Test 1: GET /api/videos - should return empty list initially
+        try:
+            response = self.session.get(f"{BASE_URL}/videos")
+            if response.status_code == 200:
+                data = response.json()
+                videos = data.get('videos', [])
+                self.log_result("Videos GET (Initial)", True, 
+                              f"Retrieved {len(videos)} videos (expected empty or existing)")
+            else:
+                self.log_result("Videos GET (Initial)", False, 
+                              f"HTTP {response.status_code}: {response.text}")
+        except Exception as e:
+            self.log_result("Videos GET (Initial)", False, f"Exception: {str(e)}")
+        
+        # Test 2: POST /api/videos - create new video (admin required)
+        video_data = {
+            "title": "NDX Trading Basics",
+            "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "description": "Learn the basics of NDX trading",
+            "category": "Beginner"
+        }
+        created_video_id = None
+        
+        try:
+            response = self.session.post(f"{BASE_URL}/videos", json=video_data)
+            if response.status_code == 200:
+                data = response.json()
+                created_video_id = data.get('id')
+                embed_url = data.get('embed_url')
+                
+                if created_video_id and embed_url and 'youtube.com/embed' in embed_url:
+                    self.log_result("Videos CREATE", True, 
+                                  f"Video created with ID: {created_video_id}, embed_url extracted: {embed_url[:50]}...")
+                else:
+                    self.log_result("Videos CREATE", False, 
+                                  f"Missing ID or embed_url in response: {data}")
+            else:
+                self.log_result("Videos CREATE", False, 
+                              f"HTTP {response.status_code}: {response.text}")
+        except Exception as e:
+            self.log_result("Videos CREATE", False, f"Exception: {str(e)}")
+        
+        # Test 3: GET /api/videos - should now return the created video
+        try:
+            response = self.session.get(f"{BASE_URL}/videos")
+            if response.status_code == 200:
+                data = response.json()
+                videos = data.get('videos', [])
+                found_video = None
+                for video in videos:
+                    if video.get('title') == "NDX Trading Basics":
+                        found_video = video
+                        break
+                
+                if found_video and found_video.get('embed_url'):
+                    self.log_result("Videos GET (After Create)", True, 
+                                  f"Found created video with embed_url: {found_video.get('embed_url')[:50]}...")
+                else:
+                    self.log_result("Videos GET (After Create)", False, 
+                                  "Created video not found or missing embed_url")
+            else:
+                self.log_result("Videos GET (After Create)", False, 
+                              f"HTTP {response.status_code}: {response.text}")
+        except Exception as e:
+            self.log_result("Videos GET (After Create)", False, f"Exception: {str(e)}")
+        
+        # Test 4: GET /api/videos/categories
+        try:
+            response = self.session.get(f"{BASE_URL}/videos/categories")
+            if response.status_code == 200:
+                data = response.json()
+                categories = data.get('categories', [])
+                if categories and 'Beginner' in categories:
+                    self.log_result("Videos GET Categories", True, 
+                                  f"Retrieved categories: {categories}")
+                else:
+                    self.log_result("Videos GET Categories", False, 
+                                  f"Expected categories with 'Beginner', got: {categories}")
+            else:
+                self.log_result("Videos GET Categories", False, 
+                              f"HTTP {response.status_code}: {response.text}")
+        except Exception as e:
+            self.log_result("Videos GET Categories", False, f"Exception: {str(e)}")
+        
+        # Test 5: DELETE /api/videos/{id} - delete the created video (admin required)
+        if created_video_id:
+            try:
+                response = self.session.delete(f"{BASE_URL}/videos/{created_video_id}")
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('status') == 'deleted':
+                        self.log_result("Videos DELETE", True, f"Video {created_video_id} deleted successfully")
+                    else:
+                        self.log_result("Videos DELETE", False, f"Unexpected response: {data}")
+                else:
+                    self.log_result("Videos DELETE", False, 
+                                  f"HTTP {response.status_code}: {response.text}")
+            except Exception as e:
+                self.log_result("Videos DELETE", False, f"Exception: {str(e)}")
+        else:
+            self.log_result("Videos DELETE", False, "No video ID to delete (creation failed)")
+    
+    def test_quote_multi_endpoint(self):
+        """Test NEW Quote Multi endpoint"""
+        print("\n=== QUOTE MULTI ENDPOINT TEST ===")
+        
+        # Test: GET /api/market/quote-multi?symbols=AAPL,MSFT,NVDA
+        try:
+            response = self.session.get(f"{BASE_URL}/market/quote-multi?symbols=AAPL,MSFT,NVDA")
+            if response.status_code == 200:
+                data = response.json()
+                quotes = data.get('quotes', [])
+                
+                if len(quotes) == 3:
+                    symbols_found = [q.get('symbol') for q in quotes]
+                    expected_symbols = ['AAPL', 'MSFT', 'NVDA']
+                    
+                    if all(sym in symbols_found for sym in expected_symbols):
+                        # Check if quotes have required fields
+                        sample_quote = quotes[0]
+                        required_fields = ['symbol', 'name', 'price', 'change', 'changePercent', 'timestamp']
+                        missing_fields = [field for field in required_fields if field not in sample_quote]
                         
                         if not missing_fields:
-                            self.log_result("Alerts", True, f"Retrieved {alerts_count} alerts with valid structure")
-                            return True
+                            self.log_result("Quote Multi", True, 
+                                          f"Retrieved 3 quotes for {symbols_found}, all required fields present",
+                                          sample_quote)
                         else:
-                            self.log_result("Alerts", False, f"Alert missing fields: {missing_fields}", sample_alert)
+                            self.log_result("Quote Multi", False, 
+                                          f"Missing required fields: {missing_fields}")
                     else:
-                        self.log_result("Alerts", True, "No alerts found (empty list is valid)")
-                        return True
+                        self.log_result("Quote Multi", False, 
+                                      f"Expected symbols {expected_symbols}, got {symbols_found}")
                 else:
-                    self.log_result("Alerts", False, "Response missing 'alerts' field", data)
+                    self.log_result("Quote Multi", False, 
+                                  f"Expected 3 quotes, got {len(quotes)}")
             else:
-                self.log_result("Alerts", False, f"HTTP {response.status_code}: {response.text}")
-                
+                self.log_result("Quote Multi", False, 
+                              f"HTTP {response.status_code}: {response.text}")
         except Exception as e:
-            self.log_result("Alerts", False, f"Exception: {str(e)}")
-        return False
-        
-    def test_chat_channels(self):
-        """Test 6: Chat - GET /api/chat/channels"""
-        print("\n=== Testing Chat Channels ===")
-        try:
-            response = self.session.get(f"{API_BASE}/chat/channels")
-            
-            if response.status_code == 200:
-                data = response.json()
-                if 'channels' in data:
-                    channels_count = len(data['channels'])
-                    if channels_count > 0:
-                        channel_names = [c.get('name', c.get('slug', 'unnamed')) for c in data['channels'][:3]]
-                        self.log_result("Chat Channels", True, f"Retrieved {channels_count} channels: {', '.join(channel_names)}...")
-                        return True
-                    else:
-                        self.log_result("Chat Channels", True, "No channels found (empty list is valid)")
-                        return True
-                else:
-                    self.log_result("Chat Channels", False, "Response missing 'channels' field", data)
-            else:
-                self.log_result("Chat Channels", False, f"HTTP {response.status_code}: {response.text}")
-                
-        except Exception as e:
-            self.log_result("Chat Channels", False, f"Exception: {str(e)}")
-        return False
-        
-    def test_webhook_alert(self):
-        """Test 7: Webhook - POST /api/alerts/webhook (no auth required)"""
-        print("\n=== Testing Webhook Alert ===")
-        try:
-            # Create a new session without auth headers for webhook test
-            webhook_session = requests.Session()
-            webhook_session.headers.update({"Content-Type": "application/json"})
-            
-            test_payload = {"content": "24,580.50"}
-            response = webhook_session.post(f"{API_BASE}/alerts/webhook", json=test_payload)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if 'alert_id' in data:
-                    self.log_result("Webhook Alert", True, f"Webhook accepted, alert_id: {data['alert_id']}")
-                    return True
-                else:
-                    self.log_result("Webhook Alert", False, "Response missing alert_id", data)
-            else:
-                self.log_result("Webhook Alert", False, f"HTTP {response.status_code}: {response.text}")
-                
-        except Exception as e:
-            self.log_result("Webhook Alert", False, f"Exception: {str(e)}")
-        return False
-        
-    def test_auth_required_endpoints(self):
-        """Test that protected endpoints require authentication"""
-        print("\n=== Testing Auth Requirements ===")
-        try:
-            # Create session without auth
-            unauth_session = requests.Session()
-            unauth_session.headers.update({"Content-Type": "application/json"})
-            
-            protected_endpoints = [
-                "/market/ndx",
-                "/market/quotes", 
-                "/alerts",
-                "/chat/channels",
-                "/preflight"
-            ]
-            
-            auth_working = True
-            for endpoint in protected_endpoints:
-                response = unauth_session.get(f"{API_BASE}{endpoint}")
-                if response.status_code != 401:
-                    self.log_result("Auth Protection", False, f"{endpoint} should return 401 but returned {response.status_code}")
-                    auth_working = False
-                    
-            if auth_working:
-                self.log_result("Auth Protection", True, "All protected endpoints correctly require authentication")
-                return True
-                
-        except Exception as e:
-            self.log_result("Auth Protection", False, f"Exception: {str(e)}")
-        return False
-        
+            self.log_result("Quote Multi", False, f"Exception: {str(e)}")
+    
     def run_all_tests(self):
-        """Run all backend API tests"""
-        print(f"🚀 Starting NDX Command Backend API Tests")
-        print(f"📡 Backend URL: {BACKEND_URL}")
-        print(f"🔑 Testing with admin credentials: {ADMIN_EMAIL}")
+        """Run all NEW endpoint tests"""
+        print("🚀 Starting NDX Command NEW Endpoints Testing...")
+        print(f"Backend URL: {BASE_URL}")
+        print(f"Test Time: {datetime.now().isoformat()}")
         
-        # Test 1: Authentication (required for other tests)
-        if not self.test_auth_login():
-            print("\n❌ Authentication failed - cannot proceed with protected endpoint tests")
+        # Step 1: Authenticate
+        if not self.authenticate():
+            print("❌ Authentication failed. Cannot proceed with protected endpoint tests.")
             return False
-            
-        # Test 2-6: Protected endpoints
-        self.test_market_ndx()
-        self.test_market_quotes()
-        self.test_preflight()
-        self.test_alerts()
-        self.test_chat_channels()
         
-        # Test 7: Webhook (no auth required)
-        self.test_webhook_alert()
-        
-        # Test 8: Auth protection
-        self.test_auth_required_endpoints()
+        # Step 2: Test NEW endpoints
+        self.test_watchlist_endpoints()
+        self.test_videos_endpoints()
+        self.test_quote_multi_endpoint()
         
         # Summary
         print("\n" + "="*60)
         print("📊 TEST SUMMARY")
         print("="*60)
         
-        passed = sum(1 for result in self.test_results if result['success'])
-        total = len(self.test_results)
+        passed = sum(1 for r in self.test_results if "✅ PASS" in r['status'])
+        failed = sum(1 for r in self.test_results if "❌ FAIL" in r['status'])
         
-        for result in self.test_results:
-            status = "✅" if result['success'] else "❌"
-            print(f"{status} {result['test']}: {result['message']}")
-            
-        print(f"\n🎯 Results: {passed}/{total} tests passed")
+        print(f"Total Tests: {len(self.test_results)}")
+        print(f"Passed: {passed}")
+        print(f"Failed: {failed}")
+        print(f"Success Rate: {(passed/len(self.test_results)*100):.1f}%")
         
-        if passed == total:
-            print("🎉 All backend API tests PASSED!")
-            return True
-        else:
-            print(f"⚠️  {total - passed} test(s) FAILED")
-            return False
-
-def main():
-    """Main test runner"""
-    tester = NDXCommandAPITester()
-    success = tester.run_all_tests()
-    sys.exit(0 if success else 1)
+        if failed > 0:
+            print("\n❌ FAILED TESTS:")
+            for result in self.test_results:
+                if "❌ FAIL" in result['status']:
+                    print(f"  - {result['test']}: {result['details']}")
+        
+        return failed == 0
 
 if __name__ == "__main__":
-    main()
+    tester = NDXCommandTester()
+    success = tester.run_all_tests()
+    sys.exit(0 if success else 1)

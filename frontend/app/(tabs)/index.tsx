@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator, Image } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, ActivityIndicator, Image, TextInput, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +28,20 @@ export default function DashboardScreen() {
   const [ndx, setNdx] = useState<Quote | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [watchlist, setWatchlist] = useState<string[]>([]);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newSymbol, setNewSymbol] = useState('');
+  const [addingSymbol, setAddingSymbol] = useState(false);
+
+  // Fetch user's watchlist
+  const fetchWatchlist = useCallback(async () => {
+    try {
+      const data = await apiFetch('/api/watchlist');
+      setWatchlist(data.symbols || []);
+    } catch (e) {
+      console.error('Watchlist fetch error:', e);
+    }
+  }, []);
 
   const fetchNdx = useCallback(async () => {
     try {
@@ -38,30 +52,80 @@ export default function DashboardScreen() {
     }
   }, []);
 
+  // Fetch quotes based on watchlist
   const fetchQuotes = useCallback(async () => {
+    if (watchlist.length === 0) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     try {
-      const data = await apiFetch('/api/market/quotes');
-      const all = data.quotes || [];
-      setQuotes(all.filter((q: Quote) => q.symbol !== 'NDX'));
-      const ndxQuote = all.find((q: Quote) => q.symbol === 'NDX');
-      if (ndxQuote) setNdx(ndxQuote);
+      const symbolsParam = watchlist.join(',');
+      const data = await apiFetch(`/api/market/quote-multi?symbols=${symbolsParam}`);
+      setQuotes(data.quotes || []);
     } catch (e) {
       console.error('Fetch quotes error:', e);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [watchlist]);
 
   useEffect(() => {
-    fetchQuotes();
+    fetchWatchlist();
     fetchNdx();
     const ndxInterval = setInterval(fetchNdx, 5000);
-    const quotesInterval = setInterval(fetchQuotes, 30000);
-    return () => { clearInterval(ndxInterval); clearInterval(quotesInterval); };
-  }, [fetchQuotes, fetchNdx]);
+    return () => { clearInterval(ndxInterval); };
+  }, [fetchNdx, fetchWatchlist]);
 
-  const onRefresh = () => { setRefreshing(true); fetchQuotes(); fetchNdx(); };
+  useEffect(() => {
+    if (watchlist.length > 0) {
+      fetchQuotes();
+      const quotesInterval = setInterval(fetchQuotes, 30000);
+      return () => clearInterval(quotesInterval);
+    } else {
+      setLoading(false);
+    }
+  }, [watchlist, fetchQuotes]);
+
+  const onRefresh = () => { setRefreshing(true); fetchWatchlist(); fetchNdx(); };
+
+  const addSymbol = async () => {
+    const sym = newSymbol.trim().toUpperCase();
+    if (!sym) return;
+    if (watchlist.includes(sym)) {
+      Alert.alert('Already Added', `${sym} is already in your watchlist.`);
+      return;
+    }
+    setAddingSymbol(true);
+    try {
+      await apiFetch('/api/watchlist/add', { method: 'POST', body: JSON.stringify({ symbol: sym }) });
+      setNewSymbol('');
+      setShowAddModal(false);
+      await fetchWatchlist();
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to add symbol');
+    } finally {
+      setAddingSymbol(false);
+    }
+  };
+
+  const removeSymbol = async (sym: string) => {
+    try {
+      await apiFetch('/api/watchlist/remove', { method: 'POST', body: JSON.stringify({ symbol: sym }) });
+      setWatchlist(prev => prev.filter(s => s !== sym));
+      setQuotes(prev => prev.filter(q => q.symbol !== sym));
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to remove symbol');
+    }
+  };
+
+  const confirmRemove = (sym: string) => {
+    Alert.alert('Remove from Watchlist', `Remove ${sym}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => removeSymbol(sym) },
+    ]);
+  };
 
   const ndxPositive = ndx ? ndx.changePercent >= 0 : true;
   const ndxColor = ndxPositive ? colors.green : colors.red;
@@ -77,7 +141,6 @@ export default function DashboardScreen() {
           </View>
           <View style={styles.cardInfo}>
             <Text style={styles.cardName} numberOfLines={1}>{item.name}</Text>
-            <Text style={styles.cardSector}>{(item as any).sector || ''}</Text>
           </View>
         </View>
         <View style={styles.cardRight}>
@@ -87,6 +150,10 @@ export default function DashboardScreen() {
             <Text style={[styles.changeText, { color }]}>{isPositive ? '+' : ''}{item.changePercent.toFixed(2)}%</Text>
           </View>
         </View>
+        {/* Long press to remove */}
+        <TouchableOpacity style={styles.removeBtn} onPress={() => confirmRemove(item.symbol)}>
+          <Ionicons name="close" size={14} color={colors.textMuted} />
+        </TouchableOpacity>
       </TouchableOpacity>
     );
   };
@@ -97,6 +164,34 @@ export default function DashboardScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      {/* Add Symbol Modal */}
+      <Modal visible={showAddModal} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Add to Watchlist</Text>
+            <Text style={styles.modalSubtitle}>Enter a stock ticker symbol</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={newSymbol}
+              onChangeText={setNewSymbol}
+              placeholder="e.g. AAPL, TSLA, GOOG"
+              placeholderTextColor={colors.textMuted}
+              autoCapitalize="characters"
+              autoFocus
+              maxLength={10}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => { setShowAddModal(false); setNewSymbol(''); }}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalAddBtn, (!newSymbol.trim() || addingSymbol) && { opacity: 0.5 }]} onPress={addSymbol} disabled={!newSymbol.trim() || addingSymbol}>
+                {addingSymbol ? <ActivityIndicator size="small" color="#000" /> : <Text style={styles.modalAddText}>Add</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
@@ -142,8 +237,6 @@ export default function DashboardScreen() {
               </View>
             </View>
           </View>
-
-          {/* NDX Stats */}
           <View style={styles.ndxStats}>
             <View style={styles.ndxStat}>
               <Text style={styles.ndxStatLabel}>Open</Text>
@@ -168,10 +261,16 @@ export default function DashboardScreen() {
         </TouchableOpacity>
       )}
 
-      {/* Section Title */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionPrefix}>⟩</Text>
-        <Text style={styles.sectionTitle}>Key Influence Stocks</Text>
+      {/* Section Title with Add Button */}
+      <View style={styles.sectionHeaderRow}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionPrefix}>⟩</Text>
+          <Text style={styles.sectionTitle}>My Watchlist</Text>
+          <Text style={styles.sectionCount}>({watchlist.length})</Text>
+        </View>
+        <TouchableOpacity style={styles.addStockBtn} onPress={() => setShowAddModal(true)}>
+          <Ionicons name="add" size={18} color={colors.green} />
+        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -182,6 +281,16 @@ export default function DashboardScreen() {
         contentContainerStyle={styles.listContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.green} />}
         showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={styles.emptyList}>
+            <Ionicons name="add-circle-outline" size={40} color={colors.textMuted} />
+            <Text style={styles.emptyText}>Your watchlist is empty</Text>
+            <TouchableOpacity style={styles.emptyAddBtn} onPress={() => setShowAddModal(true)}>
+              <Ionicons name="add" size={16} color="#000" />
+              <Text style={styles.emptyAddText}>Add Stocks</Text>
+            </TouchableOpacity>
+          </View>
+        }
       />
     </SafeAreaView>
   );
@@ -217,8 +326,6 @@ const styles = StyleSheet.create({
   ndxChangeBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.sm, marginTop: 4, gap: 4 },
   ndxChangeText: { fontSize: 13, fontWeight: '700' },
   ndxChangeAbs: { fontSize: 11, fontWeight: '500' },
-
-  // NDX Stats
   ndxStats: { flexDirection: 'row', backgroundColor: colors.bg, borderRadius: radius.sm, padding: spacing.md, borderWidth: 1, borderColor: colors.borderSubtle },
   ndxStat: { flex: 1, alignItems: 'center' },
   ndxStatLabel: { color: colors.textMuted, fontSize: 10, fontWeight: '600', marginBottom: 2, letterSpacing: 0.3 },
@@ -226,9 +333,12 @@ const styles = StyleSheet.create({
   ndxStatDivider: { width: 1, backgroundColor: colors.borderSubtle },
 
   // Section Header
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.xl, marginBottom: spacing.md, gap: spacing.sm },
+  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.xl, marginBottom: spacing.md },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   sectionPrefix: { color: colors.green, fontSize: 18, fontWeight: '800' },
   sectionTitle: { color: colors.textSecondary, fontSize: 13, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
+  sectionCount: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
+  addStockBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: colors.greenBg, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(0,200,5,0.15)' },
 
   // Stock Cards
   listContent: { paddingHorizontal: spacing.xl, paddingBottom: 20 },
@@ -238,9 +348,27 @@ const styles = StyleSheet.create({
   symbolText: { fontSize: 13, fontWeight: '800', letterSpacing: 0.3 },
   cardInfo: { flex: 1 },
   cardName: { color: colors.textPrimary, fontSize: 13, fontWeight: '600' },
-  cardSector: { color: colors.textMuted, fontSize: 10, fontWeight: '500', marginTop: 1 },
-  cardRight: { alignItems: 'flex-end' },
+  cardRight: { alignItems: 'flex-end', marginRight: 28 },
   cardPrice: { color: colors.textPrimary, fontSize: 16, fontWeight: '700' },
   changeBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, marginTop: 4, gap: 2 },
   changeText: { fontSize: 11, fontWeight: '700' },
+  removeBtn: { position: 'absolute', top: 8, right: 8, width: 24, height: 24, borderRadius: 12, backgroundColor: colors.surfaceHover, justifyContent: 'center', alignItems: 'center' },
+
+  // Empty Watchlist
+  emptyList: { alignItems: 'center', paddingTop: 40, gap: spacing.md },
+  emptyText: { color: colors.textTertiary, fontSize: 14 },
+  emptyAddBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.green, paddingHorizontal: 16, paddingVertical: 10, borderRadius: radius.pill, gap: 4 },
+  emptyAddText: { color: '#000', fontSize: 14, fontWeight: '700' },
+
+  // Add Modal
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: spacing.xxl },
+  modalCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.xxl, width: '100%', maxWidth: 360, borderWidth: 1, borderColor: colors.border },
+  modalTitle: { color: colors.textPrimary, fontSize: 18, fontWeight: '700', marginBottom: 4 },
+  modalSubtitle: { color: colors.textTertiary, fontSize: 13, marginBottom: spacing.lg },
+  modalInput: { backgroundColor: colors.bg, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 14, color: colors.textPrimary, fontSize: 18, fontWeight: '700', letterSpacing: 1, textAlign: 'center' },
+  modalActions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.xl },
+  modalCancelBtn: { flex: 1, paddingVertical: 14, borderRadius: radius.md, backgroundColor: colors.surfaceHover, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  modalCancelText: { color: colors.textSecondary, fontSize: 15, fontWeight: '600' },
+  modalAddBtn: { flex: 1, paddingVertical: 14, borderRadius: radius.md, backgroundColor: colors.green, alignItems: 'center' },
+  modalAddText: { color: '#000', fontSize: 15, fontWeight: '700' },
 });

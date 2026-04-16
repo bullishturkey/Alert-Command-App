@@ -46,9 +46,9 @@ export default function TabLayout() {
         title: 'Preflight',
         tabBarIcon: ({ color, size }) => <Ionicons name="airplane" size={size} color={color} />,
       }} />
-      <Tabs.Screen name="chat" options={{
-        title: 'Chat',
-        tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" size={size} color={color} />,
+      <Tabs.Screen name="learn" options={{
+        title: 'Learn',
+        tabBarIcon: ({ color, size }) => <Ionicons name="play-circle" size={size} color={color} />,
       }} />
     </Tabs>
   );

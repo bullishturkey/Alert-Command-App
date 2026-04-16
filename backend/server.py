@@ -803,6 +803,155 @@ async def send_message(channel_id: str, data: MessageCreate, user=Depends(get_cu
     return {k: v for k, v in msg.items() if k != '_id'}
 
 # =====================
+# VIDEO ENDPOINTS (Teaching Content)
+# =====================
+class VideoCreate(BaseModel):
+    title: str
+    description: str = ""
+    url: str
+    category: str = "General"
+    thumbnail_url: str = ""
+
+def extract_video_embed_url(url: str) -> dict:
+    """Extract embed URL and thumbnail from YouTube/Vimeo links"""
+    import re
+    # YouTube patterns
+    yt_patterns = [
+        r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([a-zA-Z0-9_-]{11})',
+        r'youtube\.com/shorts/([a-zA-Z0-9_-]{11})',
+    ]
+    for pattern in yt_patterns:
+        match = re.search(pattern, url)
+        if match:
+            vid = match.group(1)
+            return {
+                'embed_url': f'https://www.youtube.com/embed/{vid}?modestbranding=1&rel=0&showinfo=0&controls=1&playsinline=1&color=white',
+                'thumbnail': f'https://img.youtube.com/vi/{vid}/hqdefault.jpg',
+                'platform': 'youtube',
+                'video_id': vid,
+            }
+    # Vimeo patterns
+    vimeo_match = re.search(r'vimeo\.com/(\d+)', url)
+    if vimeo_match:
+        vid = vimeo_match.group(1)
+        return {
+            'embed_url': f'https://player.vimeo.com/video/{vid}?title=0&byline=0&portrait=0',
+            'thumbnail': '',
+            'platform': 'vimeo',
+            'video_id': vid,
+        }
+    # Direct URL fallback
+    return {'embed_url': url, 'thumbnail': '', 'platform': 'direct', 'video_id': ''}
+
+@api_router.get("/videos")
+async def get_videos(category: str = '', user=Depends(get_current_user)):
+    query = {}
+    if category:
+        query['category'] = category
+    videos = await db.videos.find(query, {'_id': 0}).sort('created_at', -1).to_list(100)
+    return {'videos': videos}
+
+@api_router.post("/videos")
+async def create_video(data: VideoCreate, user=Depends(get_admin_user)):
+    embed_info = extract_video_embed_url(data.url)
+    video = {
+        'id': str(uuid.uuid4()),
+        'title': data.title,
+        'description': data.description,
+        'url': data.url,
+        'embed_url': embed_info['embed_url'],
+        'thumbnail_url': data.thumbnail_url or embed_info['thumbnail'],
+        'platform': embed_info['platform'],
+        'video_id': embed_info['video_id'],
+        'category': data.category,
+        'created_by': user['username'],
+        'created_at': datetime.now(timezone.utc).isoformat(),
+    }
+    await db.videos.insert_one(video)
+    return {k: v for k, v in video.items() if k != '_id'}
+
+@api_router.delete("/videos/{video_id}")
+async def delete_video(video_id: str, user=Depends(get_admin_user)):
+    result = await db.videos.delete_one({'id': video_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail='Video not found')
+    return {'status': 'deleted'}
+
+@api_router.get("/videos/categories")
+async def get_video_categories(user=Depends(get_current_user)):
+    categories = await db.videos.distinct('category')
+    return {'categories': categories or ['General', 'Beginner', 'Strategy', 'Technical Analysis', 'Advanced']}
+
+# =====================
+# WATCHLIST ENDPOINTS
+# =====================
+DEFAULT_WATCHLIST = ['QQQ', 'NVDA', 'MSFT', 'AAPL', 'AMZN', 'META', 'TSLA', 'AMD', 'AVGO', 'GOOGL']
+
+@api_router.get("/watchlist")
+async def get_watchlist(user=Depends(get_current_user)):
+    doc = await db.watchlists.find_one({'user_id': user['id']}, {'_id': 0})
+    if not doc:
+        # Create default watchlist for new users
+        doc = {'user_id': user['id'], 'symbols': DEFAULT_WATCHLIST}
+        await db.watchlists.insert_one(doc)
+    return {'symbols': doc.get('symbols', DEFAULT_WATCHLIST)}
+
+@api_router.post("/watchlist/add")
+async def add_to_watchlist(body: dict = Body(...), user=Depends(get_current_user)):
+    symbol = body.get('symbol', '').upper().strip()
+    if not symbol:
+        raise HTTPException(status_code=400, detail='Symbol is required')
+    if len(symbol) > 10:
+        raise HTTPException(status_code=400, detail='Invalid symbol')
+    
+    doc = await db.watchlists.find_one({'user_id': user['id']})
+    if not doc:
+        await db.watchlists.insert_one({'user_id': user['id'], 'symbols': DEFAULT_WATCHLIST + [symbol]})
+    else:
+        symbols = doc.get('symbols', [])
+        if symbol not in symbols:
+            symbols.append(symbol)
+            await db.watchlists.update_one({'user_id': user['id']}, {'$set': {'symbols': symbols}})
+    
+    return {'status': 'added', 'symbol': symbol}
+
+@api_router.post("/watchlist/remove")
+async def remove_from_watchlist(body: dict = Body(...), user=Depends(get_current_user)):
+    symbol = body.get('symbol', '').upper().strip()
+    if not symbol:
+        raise HTTPException(status_code=400, detail='Symbol is required')
+    
+    doc = await db.watchlists.find_one({'user_id': user['id']})
+    if doc:
+        symbols = doc.get('symbols', [])
+        if symbol in symbols:
+            symbols.remove(symbol)
+            await db.watchlists.update_one({'user_id': user['id']}, {'$set': {'symbols': symbols}})
+    
+    return {'status': 'removed', 'symbol': symbol}
+
+@api_router.get("/market/quote-multi")
+async def get_multi_quotes(symbols: str = '', user=Depends(get_current_user)):
+    """Fetch quotes for a list of comma-separated symbols"""
+    if not symbols:
+        return {'quotes': []}
+    symbol_list = [s.strip().upper() for s in symbols.split(',') if s.strip()]
+    quotes = []
+    for sym in symbol_list:
+        if sym == 'NDX':
+            quote = await fetch_ndx_quote()
+            if not quote:
+                quote = generate_mock_quote(sym)
+        else:
+            quote = await fetch_finnhub_quote(sym)
+            if not quote:
+                # Try to generate a basic quote for unknown symbols
+                quote = generate_mock_quote(sym)
+        quote['sparkline'] = generate_mock_sparkline(sym)
+        quotes.append(quote)
+    return {'quotes': quotes}
+
+# =====================
 # ADMIN ENDPOINTS
 # =====================
 @api_router.get("/admin/users")
@@ -839,7 +988,8 @@ async def get_stats(user=Depends(get_admin_user)):
     user_count = await db.users.count_documents({})
     alert_count = await db.alerts.count_documents({})
     message_count = await db.messages.count_documents({})
-    return {'users': user_count, 'alerts': alert_count, 'messages': message_count}
+    video_count = await db.videos.count_documents({})
+    return {'users': user_count, 'alerts': alert_count, 'messages': message_count, 'videos': video_count}
 
 # === INCLUDE ROUTER & MIDDLEWARE ===
 app.include_router(api_router)
