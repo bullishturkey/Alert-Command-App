@@ -1,9 +1,42 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { StatusBar } from 'expo-status-bar';
-import { View, StyleSheet, ActivityIndicator, Image } from 'react-native';
+import { View, StyleSheet, ActivityIndicator, Image, Platform } from 'react-native';
 import { useEffect } from 'react';
 import { colors } from '../theme';
+
+// Global locale fix for web - must run before any Intl usage
+if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  try {
+    // Patch Date.prototype.toLocaleString to handle invalid locale
+    const _origDTLS = Date.prototype.toLocaleString;
+    Date.prototype.toLocaleString = function(locale?: any, options?: any) {
+      try {
+        if (typeof locale === 'string' && locale.includes('@')) locale = locale.split('@')[0];
+        return _origDTLS.call(this, locale || 'en-US', options);
+      } catch { return _origDTLS.call(this, 'en-US', options); }
+    } as any;
+    // Patch Number.prototype.toLocaleString
+    const _origNTLS = Number.prototype.toLocaleString;
+    Number.prototype.toLocaleString = function(locale?: any, options?: any) {
+      try {
+        if (typeof locale === 'string' && locale.includes('@')) locale = locale.split('@')[0];
+        return _origNTLS.call(this, locale || 'en-US', options);
+      } catch { return _origNTLS.call(this, 'en-US', options); }
+    } as any;
+    // Patch Intl.DateTimeFormat constructor
+    const _OrigDTF = Intl.DateTimeFormat;
+    const PatchedDTF = function(locales?: any, options?: any) {
+      let fixed = locales;
+      if (typeof fixed === 'string' && fixed.includes('@')) fixed = fixed.split('@')[0];
+      try { return new _OrigDTF(fixed || 'en-US', options); }
+      catch { return new _OrigDTF('en-US', options); }
+    } as any;
+    PatchedDTF.supportedLocalesOf = _OrigDTF.supportedLocalesOf;
+    PatchedDTF.prototype = _OrigDTF.prototype;
+    (Intl as any).DateTimeFormat = PatchedDTF;
+  } catch {}
+}
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Platform } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Platform, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,10 +11,78 @@ if (Platform.OS !== 'web') {
   WebView = require('react-native-webview').WebView;
 }
 
-function StockChart({ html }: { html: string }) {
+let LWC: any = null;
+if (Platform.OS === 'web') {
+  LWC = require('lightweight-charts');
+}
+
+const DETAIL_CHART_HEIGHT = 300;
+
+function StockChart({ candles, symbol }: { candles: any; symbol: string }) {
+  const containerRef = useRef<View>(null);
+  const chartRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !LWC || !containerRef.current || !candles?.t?.length) return;
+
+    const node = containerRef.current as unknown as HTMLElement;
+    if (!node) return;
+
+    if (chartRef.current) {
+      try { chartRef.current.remove(); } catch {}
+      chartRef.current = null;
+    }
+
+    try {
+      const chart = LWC.createChart(node, {
+        width: node.clientWidth || 370,
+        height: DETAIL_CHART_HEIGHT,
+        layout: { background: { type: 'solid', color: '#000' }, textColor: '#A0A0A8', fontSize: 11 },
+        grid: { vertLines: { color: '#141416' }, horzLines: { color: '#141416' } },
+        crosshair: { mode: 0 },
+        rightPriceScale: { borderColor: '#1C1C20', scaleMargins: { top: 0.1, bottom: 0.25 } },
+        timeScale: { borderColor: '#1C1C20', timeVisible: true, secondsVisible: false },
+      });
+      chartRef.current = chart;
+
+      const data = candles.t.map((time: number, i: number) => ({
+        time, open: candles.o[i], high: candles.h[i], low: candles.l[i], close: candles.c[i],
+      }));
+      const volData = candles.t.map((time: number, i: number) => ({
+        time, value: candles.v[i],
+        color: candles.c[i] >= candles.o[i] ? 'rgba(0,200,5,0.3)' : 'rgba(255,68,68,0.3)',
+      }));
+
+      const cs = chart.addCandlestickSeries({
+        upColor: '#00C805', downColor: '#FF4444',
+        borderUpColor: '#00C805', borderDownColor: '#FF4444',
+        wickUpColor: '#00C805', wickDownColor: '#FF4444',
+      });
+      cs.setData(data);
+
+      if (volData.length > 0) {
+        const vs = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol' });
+        vs.setData(volData);
+        chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+      }
+      chart.timeScale().fitContent();
+
+      const ro = new ResizeObserver(() => {
+        if (node.clientWidth > 0) chart.applyOptions({ width: node.clientWidth, height: DETAIL_CHART_HEIGHT });
+      });
+      ro.observe(node);
+      return () => { ro.disconnect(); try { chart.remove(); } catch {} chartRef.current = null; };
+    } catch (e) {
+      console.warn('Stock chart error:', e);
+    }
+  }, [candles]);
+
   if (Platform.OS === 'web') {
-    return <View style={{ flex: 1, minHeight: 300 }}><iframe srcDoc={html} style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#000' } as any} /></View>;
+    return <View ref={containerRef} style={{ width: '100%', height: DETAIL_CHART_HEIGHT, backgroundColor: '#000' }} />;
   }
+
+  // Native: use WebView with HTML
+  const html = getChartHTML(candles, symbol);
   if (WebView) {
     return <WebView testID="stock-chart-webview" source={{ html }} style={{ flex: 1, backgroundColor: 'transparent' }} scrollEnabled={false} javaScriptEnabled originWhitelist={['*']} />;
   }
@@ -85,7 +153,7 @@ export default function StockDetailScreen() {
 
           {/* Chart */}
           <View style={styles.chartContainer}>
-            <StockChart html={getChartHTML(candles, symbol || '')} />
+            <StockChart candles={candles} symbol={symbol || ''} />
           </View>
 
           {/* Timeframes */}
