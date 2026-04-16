@@ -519,12 +519,12 @@ def get_economic_events_for_week(today: datetime) -> list:
         (7, 29, 30), (9, 16, 17), (11, 4, 5), (12, 16, 17),
     ]
     for m, d1, d2 in fomc_dates:
-        meeting_date = datetime(year, m, d2, 18, 0, tzinfo=timezone.utc)
+        meeting_date = datetime(year, m, d2, 18, 0, tzinfo=timezone.utc)  # 2 PM ET = 18:00 UTC (EDT)
         if week_start.date() <= meeting_date.date() <= week_end.date():
             events.append({
                 'event': 'FOMC Interest Rate Decision',
                 'date': meeting_date.strftime('%Y-%m-%d'),
-                'time': '2:00 PM ET',
+                'time_utc': meeting_date.isoformat(),
                 'impact': 'high',
                 'category': 'fed',
                 'estimate': '',
@@ -532,14 +532,14 @@ def get_economic_events_for_week(today: datetime) -> list:
                 'description': 'Federal Reserve interest rate decision and policy statement'
             })
 
-    # CPI - typically released mid-month (around 12th-14th)
+    # CPI - typically released mid-month (around 12th-14th) at 8:30 AM ET = 12:30 UTC (EDT)
     cpi_day = 12 if monthrange(year, month)[1] >= 12 else 10
     cpi_date = datetime(year, month, cpi_day, 12, 30, tzinfo=timezone.utc)
     if week_start.date() <= cpi_date.date() <= week_end.date():
         events.append({
             'event': 'CPI (Consumer Price Index)',
             'date': cpi_date.strftime('%Y-%m-%d'),
-            'time': '8:30 AM ET',
+            'time_utc': cpi_date.isoformat(),
             'impact': 'high',
             'category': 'inflation',
             'estimate': '',
@@ -553,7 +553,7 @@ def get_economic_events_for_week(today: datetime) -> list:
         events.append({
             'event': 'PPI (Producer Price Index)',
             'date': ppi_date.strftime('%Y-%m-%d'),
-            'time': '8:30 AM ET',
+            'time_utc': ppi_date.isoformat(),
             'impact': 'high',
             'category': 'inflation',
             'estimate': '',
@@ -561,7 +561,7 @@ def get_economic_events_for_week(today: datetime) -> list:
             'description': 'Wholesale inflation data - leading indicator for consumer prices'
         })
 
-    # NFP (Non-Farm Payrolls) - first Friday of month
+    # NFP (Non-Farm Payrolls) - first Friday at 8:30 AM ET = 12:30 UTC (EDT)
     first_day = datetime(year, month, 1)
     days_until_friday = (4 - first_day.weekday()) % 7
     nfp_date = datetime(year, month, 1 + days_until_friday, 12, 30, tzinfo=timezone.utc)
@@ -569,7 +569,7 @@ def get_economic_events_for_week(today: datetime) -> list:
         events.append({
             'event': 'Non-Farm Payrolls (NFP)',
             'date': nfp_date.strftime('%Y-%m-%d'),
-            'time': '8:30 AM ET',
+            'time_utc': nfp_date.isoformat(),
             'impact': 'high',
             'category': 'employment',
             'estimate': '',
@@ -577,14 +577,14 @@ def get_economic_events_for_week(today: datetime) -> list:
             'description': 'Monthly jobs report - major market mover'
         })
 
-    # Initial Jobless Claims - every Thursday
+    # Initial Jobless Claims - every Thursday at 8:30 AM ET = 12:30 UTC (EDT)
     days_until_thurs = (3 - weekday) % 7
-    claims_date = today + timedelta(days=days_until_thurs)
-    if week_start.date() <= claims_date.date() <= week_end.date():
+    claims_date_dt = datetime(year, month, (today + timedelta(days=days_until_thurs)).day, 12, 30, tzinfo=timezone.utc)
+    if week_start.date() <= claims_date_dt.date() <= week_end.date():
         events.append({
             'event': 'Initial Jobless Claims',
-            'date': claims_date.strftime('%Y-%m-%d'),
-            'time': '8:30 AM ET',
+            'date': claims_date_dt.strftime('%Y-%m-%d'),
+            'time_utc': claims_date_dt.isoformat(),
             'impact': 'medium',
             'category': 'employment',
             'estimate': '',
@@ -592,14 +592,14 @@ def get_economic_events_for_week(today: datetime) -> list:
             'description': 'Weekly unemployment claims data'
         })
 
-    # Retail Sales - mid-month, around the 15th
+    # Retail Sales - mid-month at 8:30 AM ET = 12:30 UTC (EDT)
     retail_day = 15 if monthrange(year, month)[1] >= 15 else 13
     retail_date = datetime(year, month, retail_day, 12, 30, tzinfo=timezone.utc)
     if week_start.date() <= retail_date.date() <= week_end.date():
         events.append({
             'event': 'Retail Sales',
             'date': retail_date.strftime('%Y-%m-%d'),
-            'time': '8:30 AM ET',
+            'time_utc': retail_date.isoformat(),
             'impact': 'medium',
             'category': 'economic',
             'estimate': '',

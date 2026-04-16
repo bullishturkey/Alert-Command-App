@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiFetch, timeAgo } from '../../utils/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { colors, spacing, radius } from '../../theme';
 
 interface Channel {
   id: string;
@@ -87,13 +88,16 @@ export default function ChatScreen() {
   };
 
   if (loading) {
-    return <View style={styles.center}><ActivityIndicator size="large" color="#00C805" /></View>;
+    return <View style={styles.center}><ActivityIndicator size="large" color={colors.green} /></View>;
   }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.title}>Community</Text>
+        <View style={styles.headerTitleRow}>
+          <Text style={styles.sectionPrefix}>⟩</Text>
+          <Text style={styles.title}>Community</Text>
+        </View>
         <Text style={styles.channelName}>{activeChannel?.name || ''}</Text>
       </View>
 
@@ -122,13 +126,20 @@ export default function ChatScreen() {
           contentContainerStyle={styles.messagesList}
           showsVerticalScrollIndicator={false}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
-          ListEmptyComponent={<View style={styles.empty}><Ionicons name="chatbubble-ellipses-outline" size={48} color="#555" /><Text style={styles.emptyText}>Start the conversation</Text></View>}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <View style={styles.emptyIconWrap}>
+                <Ionicons name="chatbubble-ellipses-outline" size={40} color={colors.textMuted} />
+              </View>
+              <Text style={styles.emptyText}>Start the conversation</Text>
+            </View>
+          }
         />
 
         <View style={styles.inputBar}>
-          <TextInput testID="chat-input" style={styles.input} placeholder="Type a message..." placeholderTextColor="#555" value={newMessage} onChangeText={setNewMessage} multiline maxLength={500} />
+          <TextInput testID="chat-input" style={styles.input} placeholder="Type a message..." placeholderTextColor={colors.textMuted} value={newMessage} onChangeText={setNewMessage} multiline maxLength={500} />
           <TouchableOpacity testID="chat-send-btn" style={[styles.sendBtn, (!newMessage.trim() || sending) && styles.sendBtnDisabled]} onPress={sendMessage} disabled={!newMessage.trim() || sending}>
-            <Ionicons name="send" size={18} color={newMessage.trim() ? '#000' : '#555'} />
+            <Ionicons name="send" size={16} color={newMessage.trim() ? '#000' : colors.textMuted} />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -137,28 +148,31 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#000' },
+  safe: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
-  center: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12 },
-  title: { fontSize: 24, fontWeight: '700', color: '#fff' },
-  channelName: { color: '#A1A1AA', fontSize: 13 },
+  center: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.xl, paddingVertical: spacing.md },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  sectionPrefix: { color: colors.green, fontSize: 22, fontWeight: '800' },
+  title: { fontSize: 22, fontWeight: '700', color: colors.textPrimary },
+  channelName: { color: colors.textTertiary, fontSize: 12, fontWeight: '500' },
   channelTabs: { marginBottom: 4 },
-  channelTabsContent: { paddingHorizontal: 16, gap: 8 },
-  channelTab: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: '#1C1C1E' },
-  channelTabActive: { backgroundColor: '#00C805' },
-  channelTabText: { color: '#A1A1AA', fontSize: 12, fontWeight: '600' },
+  channelTabsContent: { paddingHorizontal: spacing.lg, gap: spacing.sm },
+  channelTab: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  channelTabActive: { backgroundColor: colors.green, borderColor: colors.green },
+  channelTabText: { color: colors.textSecondary, fontSize: 11, fontWeight: '700' },
   channelTabTextActive: { color: '#000' },
-  messagesList: { paddingHorizontal: 20, paddingVertical: 12, flexGrow: 1 },
-  messageBubble: { backgroundColor: '#1C1C1E', borderRadius: 14, borderBottomLeftRadius: 4, padding: 12, marginBottom: 8, maxWidth: '80%', alignSelf: 'flex-start' },
-  messageBubbleMine: { backgroundColor: '#0A84FF', alignSelf: 'flex-end', borderBottomLeftRadius: 14, borderBottomRightRadius: 4 },
-  messageUser: { color: '#00C805', fontSize: 12, fontWeight: '700', marginBottom: 4 },
-  messageText: { color: '#fff', fontSize: 14, lineHeight: 20 },
-  messageTime: { color: 'rgba(255,255,255,0.4)', fontSize: 10, marginTop: 4, alignSelf: 'flex-end' },
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: '#1C1C1E', gap: 10 },
-  input: { flex: 1, backgroundColor: '#1C1C1E', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, color: '#fff', fontSize: 15, maxHeight: 100 },
-  sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#00C805', justifyContent: 'center', alignItems: 'center' },
-  sendBtnDisabled: { backgroundColor: '#27272A' },
-  empty: { alignItems: 'center', justifyContent: 'center', flex: 1, paddingTop: 100, gap: 12 },
-  emptyText: { color: '#555', fontSize: 15 },
+  messagesList: { paddingHorizontal: spacing.xl, paddingVertical: spacing.md, flexGrow: 1 },
+  messageBubble: { backgroundColor: colors.surface, borderRadius: radius.md, borderBottomLeftRadius: 4, padding: spacing.md, marginBottom: spacing.sm, maxWidth: '80%', alignSelf: 'flex-start' as const, borderWidth: 1, borderColor: colors.border },
+  messageBubbleMine: { backgroundColor: colors.greenDim, alignSelf: 'flex-end' as const, borderBottomLeftRadius: radius.md, borderBottomRightRadius: 4, borderColor: 'rgba(0,200,5,0.2)' },
+  messageUser: { color: colors.green, fontSize: 11, fontWeight: '700', marginBottom: 3 },
+  messageText: { color: colors.textPrimary, fontSize: 14, lineHeight: 20 },
+  messageTime: { color: 'rgba(255,255,255,0.3)', fontSize: 9, marginTop: 4, alignSelf: 'flex-end' as const },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, gap: spacing.sm },
+  input: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.xl, paddingHorizontal: spacing.lg, paddingVertical: 10, color: colors.textPrimary, fontSize: 14, maxHeight: 100, borderWidth: 1, borderColor: colors.border },
+  sendBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.green, justifyContent: 'center', alignItems: 'center' },
+  sendBtnDisabled: { backgroundColor: colors.surfaceHover },
+  empty: { alignItems: 'center', justifyContent: 'center', flex: 1, paddingTop: 100, gap: spacing.md },
+  emptyIconWrap: { width: 72, height: 72, borderRadius: 18, backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  emptyText: { color: colors.textTertiary, fontSize: 14 },
 });

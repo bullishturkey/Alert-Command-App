@@ -3,6 +3,7 @@ import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } f
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiFetch, timeAgo } from '../../utils/api';
+import { colors, spacing, radius } from '../../theme';
 
 interface Alert {
   id: string;
@@ -45,7 +46,7 @@ export default function AlertsScreen() {
       <View testID={`alert-item-${item.id}`} style={[styles.alertCard, isNewest && styles.alertCardNewest]}>
         <View style={styles.alertTop}>
           <View style={styles.signalBadge}>
-            <Ionicons name="flash" size={12} color="#FFD60A" />
+            <Ionicons name="flash" size={11} color={colors.yellow} />
             <Text style={styles.signalText}>TRADE SIGNAL</Text>
           </View>
           <Text style={styles.alertTime}>{timeAgo(item.created_at)}</Text>
@@ -63,7 +64,7 @@ export default function AlertsScreen() {
 
         <View style={styles.alertBottom}>
           <View style={styles.sourceRow}>
-            <Ionicons name="pulse" size={12} color="#555" />
+            <Ionicons name="pulse" size={11} color={colors.textMuted} />
             <Text style={styles.sourceText}>{item.created_by || 'TradingView'}</Text>
           </View>
           {isNewest && (
@@ -77,15 +78,18 @@ export default function AlertsScreen() {
   };
 
   if (loading) {
-    return <View style={styles.center}><ActivityIndicator size="large" color="#00C805" /></View>;
+    return <View style={styles.center}><ActivityIndicator size="large" color={colors.green} /></View>;
   }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>NDX Alerts</Text>
-          <Text style={styles.subtitle}>TradingView Pipeline</Text>
+          <View style={styles.headerTitleRow}>
+            <Text style={styles.sectionPrefix}>⟩</Text>
+            <Text style={styles.title}>NDX Alerts</Text>
+          </View>
+          <Text style={styles.subtitle}>TradingView → Pipedream Pipeline</Text>
         </View>
         <View style={styles.liveIndicator}>
           <View style={styles.liveDot} />
@@ -99,11 +103,13 @@ export default function AlertsScreen() {
         keyExtractor={item => item.id}
         renderItem={renderAlert}
         contentContainerStyle={styles.listContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchAlerts(); }} tintColor="#00C805" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchAlerts(); }} tintColor={colors.green} />}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Ionicons name="flash-outline" size={56} color="#27272A" />
+            <View style={styles.emptyIconWrap}>
+              <Ionicons name="flash-outline" size={48} color={colors.textMuted} />
+            </View>
             <Text style={styles.emptyTitle}>Waiting for Signals</Text>
             <Text style={styles.emptyText}>When TradingView conditions are met, NDX price alerts will appear here instantly.</Text>
           </View>
@@ -114,38 +120,41 @@ export default function AlertsScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#000' },
-  center: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },
-  title: { fontSize: 24, fontWeight: '700', color: '#fff' },
-  subtitle: { fontSize: 12, color: '#555', marginTop: 2 },
-  liveIndicator: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,200,5,0.1)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20, gap: 6 },
-  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#00C805' },
-  liveText: { color: '#00C805', fontSize: 11, fontWeight: '800', letterSpacing: 1 },
-  listContent: { paddingHorizontal: 20, paddingBottom: 20 },
+  safe: { flex: 1, backgroundColor: colors.bg },
+  center: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.xl, paddingVertical: spacing.lg },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  sectionPrefix: { color: colors.green, fontSize: 22, fontWeight: '800' },
+  title: { fontSize: 22, fontWeight: '700', color: colors.textPrimary },
+  subtitle: { fontSize: 11, color: colors.textTertiary, marginTop: 2, marginLeft: 28 },
+  liveIndicator: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.greenBg, paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill, gap: 5, borderWidth: 1, borderColor: 'rgba(0,200,5,0.15)' },
+  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.green },
+  liveText: { color: colors.green, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  listContent: { paddingHorizontal: spacing.xl, paddingBottom: 20 },
 
-  alertCard: { backgroundColor: '#1C1C1E', borderRadius: 14, padding: 18, marginBottom: 10, borderLeftWidth: 3, borderLeftColor: '#FFD60A' },
-  alertCardNewest: { borderLeftColor: '#00C805', borderWidth: 1, borderColor: 'rgba(0,200,5,0.2)' },
+  alertCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md, borderWidth: 1, borderColor: colors.border, borderLeftWidth: 3, borderLeftColor: colors.yellow },
+  alertCardNewest: { borderLeftColor: colors.green, borderColor: 'rgba(0,200,5,0.15)' },
 
-  alertTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  signalBadge: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  signalText: { color: '#FFD60A', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
-  alertTime: { color: '#555', fontSize: 12 },
+  alertTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
+  signalBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.yellowBg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill },
+  signalText: { color: colors.yellow, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
+  alertTime: { color: colors.textMuted, fontSize: 11 },
 
-  priceRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 8 },
-  ndxLabel: { color: '#A1A1AA', fontSize: 16, fontWeight: '700' },
-  atSymbol: { color: '#555', fontSize: 14 },
-  priceValue: { color: '#fff', fontSize: 28, fontWeight: '800' },
+  priceRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: spacing.sm },
+  ndxLabel: { color: colors.textSecondary, fontSize: 15, fontWeight: '700' },
+  atSymbol: { color: colors.textMuted, fontSize: 13 },
+  priceValue: { color: colors.textPrimary, fontSize: 26, fontWeight: '800' },
 
-  alertMessage: { color: '#A1A1AA', fontSize: 13, lineHeight: 18, marginBottom: 8 },
+  alertMessage: { color: colors.textSecondary, fontSize: 13, lineHeight: 18, marginBottom: spacing.sm },
 
   alertBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
-  sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  sourceText: { color: '#555', fontSize: 11 },
-  newBadge: { backgroundColor: 'rgba(0,200,5,0.15)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  newBadgeText: { color: '#00C805', fontSize: 10, fontWeight: '800' },
+  sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  sourceText: { color: colors.textMuted, fontSize: 10, fontWeight: '500' },
+  newBadge: { backgroundColor: colors.greenBg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill, borderWidth: 1, borderColor: 'rgba(0,200,5,0.15)' },
+  newBadgeText: { color: colors.green, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
 
-  empty: { alignItems: 'center', paddingTop: 80, paddingHorizontal: 40, gap: 12 },
-  emptyTitle: { color: '#fff', fontSize: 18, fontWeight: '600' },
-  emptyText: { color: '#555', fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  empty: { alignItems: 'center', paddingTop: 80, paddingHorizontal: 40, gap: spacing.md },
+  emptyIconWrap: { width: 80, height: 80, borderRadius: 20, backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  emptyTitle: { color: colors.textPrimary, fontSize: 17, fontWeight: '700' },
+  emptyText: { color: colors.textTertiary, fontSize: 13, textAlign: 'center', lineHeight: 19 },
 });

@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingVi
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
+import { colors, spacing, radius, typography } from '../theme';
 
 export default function AuthScreen() {
   const { user, isLoading, login, register } = useAuth();
@@ -17,12 +18,12 @@ export default function AuthScreen() {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#00C805" />
+        <ActivityIndicator size="large" color={colors.green} />
       </View>
     );
   }
 
-  if (user) return null; // Auth guard in _layout.tsx handles redirect
+  if (user) return null;
 
   const handleSubmit = async () => {
     if (!email || !password || (!isLogin && !username)) {
@@ -48,12 +49,17 @@ export default function AuthScreen() {
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.flex}>
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          {/* Brand Hero */}
           <View style={styles.brandSection}>
-            <Image source={require('../assets/ndx-logo.png')} style={styles.logoImage} resizeMode="contain" />
+            <View style={styles.logoGlow}>
+              <Image source={require('../assets/ndx-logo.png')} style={styles.logoImage} resizeMode="contain" />
+            </View>
             <Text style={styles.brandName}>NDX Command</Text>
-            <Text style={styles.brandTagline}>Trading Intelligence Platform</Text>
+            <Text style={styles.brandTagline}>THE TRADING INTELLIGENCE PLATFORM.</Text>
+            <Text style={styles.brandDesc}>Real-time NDX tracking, AI sentiment analysis,{'\n'}and community-driven trade intelligence.</Text>
           </View>
 
+          {/* Form Card */}
           <View style={styles.formCard}>
             <View style={styles.tabRow}>
               <TouchableOpacity testID="auth-login-tab" style={[styles.tab, isLogin && styles.tabActive]} onPress={() => { setIsLogin(true); setError(''); }}>
@@ -66,7 +72,7 @@ export default function AuthScreen() {
 
             {error ? (
               <View style={styles.errorBox}>
-                <Ionicons name="alert-circle" size={16} color="#FF5000" />
+                <Ionicons name="alert-circle" size={16} color={colors.red} />
                 <Text style={styles.errorText}>{error}</Text>
               </View>
             ) : null}
@@ -74,8 +80,8 @@ export default function AuthScreen() {
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Email</Text>
               <View style={styles.inputRow}>
-                <Ionicons name="mail-outline" size={18} color="#A1A1AA" style={styles.inputIcon} />
-                <TextInput testID="auth-email-input" style={styles.input} placeholder="you@example.com" placeholderTextColor="#555" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
+                <Ionicons name="mail-outline" size={18} color={colors.textTertiary} style={styles.inputIcon} />
+                <TextInput testID="auth-email-input" style={styles.input} placeholder="you@example.com" placeholderTextColor={colors.textMuted} value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
               </View>
             </View>
 
@@ -83,8 +89,8 @@ export default function AuthScreen() {
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Username</Text>
                 <View style={styles.inputRow}>
-                  <Ionicons name="person-outline" size={18} color="#A1A1AA" style={styles.inputIcon} />
-                  <TextInput testID="auth-username-input" style={styles.input} placeholder="Your username" placeholderTextColor="#555" value={username} onChangeText={setUsername} autoCapitalize="none" />
+                  <Ionicons name="person-outline" size={18} color={colors.textTertiary} style={styles.inputIcon} />
+                  <TextInput testID="auth-username-input" style={styles.input} placeholder="Your username" placeholderTextColor={colors.textMuted} value={username} onChangeText={setUsername} autoCapitalize="none" />
                 </View>
               </View>
             )}
@@ -92,10 +98,10 @@ export default function AuthScreen() {
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Password</Text>
               <View style={styles.inputRow}>
-                <Ionicons name="lock-closed-outline" size={18} color="#A1A1AA" style={styles.inputIcon} />
-                <TextInput testID="auth-password-input" style={styles.input} placeholder="Your password" placeholderTextColor="#555" value={password} onChangeText={setPassword} secureTextEntry={!showPassword} />
+                <Ionicons name="lock-closed-outline" size={18} color={colors.textTertiary} style={styles.inputIcon} />
+                <TextInput testID="auth-password-input" style={styles.input} placeholder="Your password" placeholderTextColor={colors.textMuted} value={password} onChangeText={setPassword} secureTextEntry={!showPassword} />
                 <TouchableOpacity testID="auth-toggle-password" onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
-                  <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={18} color="#A1A1AA" />
+                  <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={18} color={colors.textTertiary} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -117,31 +123,44 @@ export default function AuthScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#000' },
+  safe: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
-  scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 24 },
-  loadingContainer: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
+  scrollContent: { flexGrow: 1, justifyContent: 'center', padding: spacing.xxl },
+  loadingContainer: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center' },
+
+  // Brand
   brandSection: { alignItems: 'center', marginBottom: 40 },
-  logoImage: { width: 90, height: 90, borderRadius: 20, marginBottom: 16 },
-  brandName: { fontSize: 32, fontWeight: '700', color: '#fff', letterSpacing: 1 },
-  brandTagline: { fontSize: 14, color: '#A1A1AA', marginTop: 4 },
-  formCard: { backgroundColor: '#1C1C1E', borderRadius: 16, padding: 24 },
-  tabRow: { flexDirection: 'row', marginBottom: 24, backgroundColor: '#000', borderRadius: 10, padding: 4 },
-  tab: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
-  tabActive: { backgroundColor: '#27272A' },
-  tabText: { color: '#A1A1AA', fontSize: 15, fontWeight: '600' },
-  tabTextActive: { color: '#fff' },
-  errorBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,80,0,0.1)', padding: 12, borderRadius: 8, marginBottom: 16, gap: 8 },
-  errorText: { color: '#FF5000', fontSize: 13, flex: 1 },
-  inputGroup: { marginBottom: 16 },
-  label: { color: '#A1A1AA', fontSize: 13, fontWeight: '500', marginBottom: 6 },
-  inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#000', borderRadius: 10, borderWidth: 1, borderColor: '#27272A', paddingHorizontal: 12 },
-  inputIcon: { marginRight: 8 },
-  input: { flex: 1, color: '#fff', fontSize: 16, paddingVertical: 14 },
+  logoGlow: { 
+    width: 100, height: 100, borderRadius: 24, justifyContent: 'center', alignItems: 'center',
+    backgroundColor: 'rgba(0,200,5,0.06)', borderWidth: 1, borderColor: 'rgba(0,200,5,0.12)', marginBottom: 20,
+  },
+  logoImage: { width: 80, height: 80, borderRadius: 18 },
+  brandName: { fontSize: 34, fontWeight: '800', color: colors.textPrimary, letterSpacing: 1 },
+  brandTagline: { fontSize: 12, color: colors.green, marginTop: 8, letterSpacing: 2, fontWeight: '700' },
+  brandDesc: { fontSize: 13, color: colors.textTertiary, marginTop: 12, textAlign: 'center', lineHeight: 19 },
+
+  // Form
+  formCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.xxl, borderWidth: 1, borderColor: colors.border },
+  tabRow: { flexDirection: 'row', marginBottom: spacing.xxl, backgroundColor: colors.bg, borderRadius: radius.sm, padding: 3, borderWidth: 1, borderColor: colors.borderSubtle },
+  tab: { flex: 1, paddingVertical: 10, borderRadius: 6, alignItems: 'center' },
+  tabActive: { backgroundColor: colors.surfaceElevated },
+  tabText: { color: colors.textTertiary, fontSize: 14, fontWeight: '600' },
+  tabTextActive: { color: colors.textPrimary },
+
+  errorBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.redBg, padding: spacing.md, borderRadius: radius.sm, marginBottom: spacing.lg, gap: spacing.sm, borderWidth: 1, borderColor: 'rgba(255,68,68,0.15)' },
+  errorText: { color: colors.red, fontSize: 13, flex: 1 },
+
+  inputGroup: { marginBottom: spacing.lg },
+  label: { color: colors.textSecondary, fontSize: 12, fontWeight: '600', marginBottom: 6, letterSpacing: 0.3 },
+  inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bg, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14 },
+  inputIcon: { marginRight: 10 },
+  input: { flex: 1, color: colors.textPrimary, fontSize: 15, paddingVertical: 14 },
   eyeBtn: { padding: 8 },
-  submitBtn: { backgroundColor: '#00C805', borderRadius: 12, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
+
+  submitBtn: { backgroundColor: colors.green, borderRadius: radius.md, paddingVertical: 16, alignItems: 'center', marginTop: spacing.sm },
   submitBtnDisabled: { opacity: 0.6 },
   submitBtnText: { color: '#000', fontSize: 16, fontWeight: '700' },
-  demoHint: { marginTop: 16, alignItems: 'center' },
-  demoText: { color: '#555', fontSize: 12 },
+
+  demoHint: { marginTop: spacing.lg, alignItems: 'center' },
+  demoText: { color: colors.textMuted, fontSize: 11, letterSpacing: 0.3 },
 });

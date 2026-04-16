@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiFetch, getChartHTML } from '../../utils/api';
+import { colors, spacing, radius } from '../../theme';
 
 let WebView: any = null;
 if (Platform.OS !== 'web') {
@@ -32,7 +33,7 @@ function WebChart({ html }: { html: string }) {
       />
     );
   }
-  return <View style={styles.chartLoading}><Text style={{ color: '#A1A1AA' }}>Chart not available</Text></View>;
+  return <View style={styles.chartLoading}><Text style={{ color: colors.textSecondary }}>Chart not available</Text></View>;
 }
 
 const SYMBOLS = ['NDX', 'QQQ', 'NVDA', 'MSFT', 'AAPL', 'AMZN', 'META', 'TSLA', 'AMD', 'AVGO', 'GOOGL'];
@@ -65,14 +66,18 @@ export default function ChartsScreen() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const isPositive = quote ? quote.changePercent >= 0 : true;
-  const color = isPositive ? '#00C805' : '#FF5000';
+  const color = isPositive ? colors.green : colors.red;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Charts</Text>
+        <View style={styles.headerLeft}>
+          <Text style={styles.sectionPrefix}>⟩</Text>
+          <Text style={styles.title}>Charts</Text>
+        </View>
         <TouchableOpacity testID="chart-refresh-btn" onPress={fetchData} style={styles.refreshBtn}>
-          <Ionicons name="refresh" size={20} color="#A1A1AA" />
+          <Ionicons name="refresh" size={18} color={colors.textSecondary} />
         </TouchableOpacity>
       </View>
 
@@ -90,8 +95,8 @@ export default function ChartsScreen() {
         <View style={styles.quoteBar}>
           <Text style={styles.quoteSymbol}>{quote.symbol}</Text>
           <Text style={styles.quotePrice}>${typeof quote.price === 'number' ? quote.price.toFixed(2) : quote.price}</Text>
-          <View style={[styles.quoteBadge, { backgroundColor: isPositive ? 'rgba(0,200,5,0.15)' : 'rgba(255,80,0,0.15)' }]}>
-            <Ionicons name={isPositive ? 'caret-up' : 'caret-down'} size={12} color={color} />
+          <View style={[styles.quoteBadge, { backgroundColor: isPositive ? colors.greenBg : colors.redBg }]}>
+            <Ionicons name={isPositive ? 'caret-up' : 'caret-down'} size={10} color={color} />
             <Text style={[styles.quoteChange, { color }]}>{isPositive ? '+' : ''}{quote.changePercent?.toFixed(2)}%</Text>
           </View>
         </View>
@@ -101,7 +106,7 @@ export default function ChartsScreen() {
       <View style={styles.chartContainer}>
         {loading ? (
           <View style={styles.chartLoading}>
-            <ActivityIndicator size="large" color="#00C805" />
+            <ActivityIndicator size="large" color={colors.green} />
           </View>
         ) : (
           <WebChart html={getChartHTML(candles, symbol)} />
@@ -129,30 +134,32 @@ export default function ChartsScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#000' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12 },
-  title: { fontSize: 24, fontWeight: '700', color: '#fff' },
-  refreshBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#1C1C1E', justifyContent: 'center', alignItems: 'center' },
-  symbolScroll: { maxHeight: 44, marginBottom: 8 },
-  symbolScrollContent: { paddingHorizontal: 16, gap: 8 },
-  symbolPill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#1C1C1E' },
-  symbolPillActive: { backgroundColor: '#00C805' },
-  symbolPillText: { color: '#A1A1AA', fontSize: 13, fontWeight: '600' },
+  safe: { flex: 1, backgroundColor: colors.bg },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.xl, paddingVertical: spacing.md },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  sectionPrefix: { color: colors.green, fontSize: 22, fontWeight: '800' },
+  title: { fontSize: 22, fontWeight: '700', color: colors.textPrimary },
+  refreshBtn: { width: 36, height: 36, borderRadius: 10, backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  symbolScroll: { maxHeight: 44, marginBottom: spacing.sm },
+  symbolScrollContent: { paddingHorizontal: spacing.lg, gap: spacing.sm },
+  symbolPill: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  symbolPillActive: { backgroundColor: colors.green, borderColor: colors.green },
+  symbolPillText: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
   symbolPillTextActive: { color: '#000' },
-  quoteBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 8, gap: 12 },
-  quoteSymbol: { color: '#A1A1AA', fontSize: 14, fontWeight: '600' },
-  quotePrice: { color: '#fff', fontSize: 22, fontWeight: '700' },
-  quoteBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, gap: 2 },
-  quoteChange: { fontSize: 13, fontWeight: '700' },
-  chartContainer: { flex: 1, marginHorizontal: 12, backgroundColor: '#000', borderRadius: 12, overflow: 'hidden' },
+  quoteBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.xl, paddingVertical: spacing.sm, gap: spacing.md },
+  quoteSymbol: { color: colors.textTertiary, fontSize: 13, fontWeight: '700' },
+  quotePrice: { color: colors.textPrimary, fontSize: 22, fontWeight: '800' },
+  quoteBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, gap: 3 },
+  quoteChange: { fontSize: 12, fontWeight: '700' },
+  chartContainer: { flex: 1, marginHorizontal: spacing.md, backgroundColor: colors.bg, borderRadius: radius.md, overflow: 'hidden', borderWidth: 1, borderColor: colors.border },
   chartLoading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   webview: { flex: 1, backgroundColor: 'transparent' },
-  timeframeRow: { flexDirection: 'row', justifyContent: 'center', paddingVertical: 12, gap: 8 },
-  tfBtn: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20, backgroundColor: '#1C1C1E' },
-  tfBtnActive: { backgroundColor: '#27272A', borderWidth: 1, borderColor: '#00C805' },
-  tfText: { color: '#A1A1AA', fontSize: 13, fontWeight: '600' },
-  tfTextActive: { color: '#00C805' },
-  indicatorRow: { flexDirection: 'row', justifyContent: 'center', paddingBottom: 8, gap: 8 },
-  indicatorPill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#1C1C1E', borderWidth: 1, borderColor: '#27272A' },
-  indicatorText: { color: '#A1A1AA', fontSize: 11, fontWeight: '600' },
+  timeframeRow: { flexDirection: 'row', justifyContent: 'center', paddingVertical: spacing.md, gap: spacing.sm },
+  tfBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  tfBtnActive: { backgroundColor: colors.surfaceHover, borderColor: colors.green },
+  tfText: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
+  tfTextActive: { color: colors.green },
+  indicatorRow: { flexDirection: 'row', justifyContent: 'center', paddingBottom: spacing.sm, gap: spacing.sm },
+  indicatorPill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  indicatorText: { color: colors.textTertiary, fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
 });

@@ -2,6 +2,7 @@ import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { colors } from '../../theme';
 
 export default function TabLayout() {
   const { user, isLoading } = useAuth();
@@ -9,20 +10,25 @@ export default function TabLayout() {
   if (isLoading) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator size="large" color="#00C805" />
+        <ActivityIndicator size="large" color={colors.green} />
       </View>
     );
   }
 
-  // Auth guard is handled by root _layout.tsx AuthGuard
-
   return (
     <Tabs screenOptions={{
       headerShown: false,
-      tabBarStyle: { backgroundColor: '#0A0A0A', borderTopColor: '#1C1C1E', borderTopWidth: 1, height: 85, paddingBottom: 28, paddingTop: 8 },
-      tabBarActiveTintColor: '#00C805',
-      tabBarInactiveTintColor: '#555',
-      tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+      tabBarStyle: {
+        backgroundColor: colors.bg,
+        borderTopColor: colors.border,
+        borderTopWidth: 1,
+        height: 85,
+        paddingBottom: 28,
+        paddingTop: 8,
+      },
+      tabBarActiveTintColor: colors.green,
+      tabBarInactiveTintColor: colors.textMuted,
+      tabBarLabelStyle: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
     }}>
       <Tabs.Screen name="index" options={{
         title: 'Markets',
@@ -49,5 +55,5 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
-  loading: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
+  loading: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center' },
 });

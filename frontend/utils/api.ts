@@ -54,7 +54,7 @@ export function getChartHTML(candles: any, symbol: string, theme: 'dark' | 'ligh
   const volumeData = candles.t.map((time: number, i: number) => ({
     time,
     value: candles.v[i],
-    color: candles.c[i] >= candles.o[i] ? 'rgba(0,200,5,0.3)' : 'rgba(255,80,0,0.3)',
+    color: candles.c[i] >= candles.o[i] ? 'rgba(0,200,5,0.3)' : 'rgba(255,68,68,0.3)',
   }));
   return `<!DOCTYPE html>
 <html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
@@ -62,15 +62,15 @@ export function getChartHTML(candles: any, symbol: string, theme: 'dark' | 'ligh
 <style>*{margin:0;padding:0;box-sizing:border-box}body{background:#000;overflow:hidden}#chart{width:100vw;height:100vh}</style>
 </head><body><div id="chart"></div><script>
 const chart=LightweightCharts.createChart(document.getElementById('chart'),{
-  layout:{background:{type:'solid',color:'#000'},textColor:'#A1A1AA',fontSize:11},
-  grid:{vertLines:{color:'#1C1C1E'},horzLines:{color:'#1C1C1E'}},
-  crosshair:{mode:0,vertLine:{color:'#555',width:1,style:3},horzLine:{color:'#555',width:1,style:3}},
-  rightPriceScale:{borderColor:'#27272A',scaleMargins:{top:0.1,bottom:0.25}},
-  timeScale:{borderColor:'#27272A',timeVisible:true,secondsVisible:false},
+  layout:{background:{type:'solid',color:'#000'},textColor:'#A0A0A8',fontSize:11},
+  grid:{vertLines:{color:'#141416'},horzLines:{color:'#141416'}},
+  crosshair:{mode:0,vertLine:{color:'#606068',width:1,style:3},horzLine:{color:'#606068',width:1,style:3}},
+  rightPriceScale:{borderColor:'#1C1C20',scaleMargins:{top:0.1,bottom:0.25}},
+  timeScale:{borderColor:'#1C1C20',timeVisible:true,secondsVisible:false},
   handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false},
   handleScale:{axisPressedMouseMove:true,mouseWheel:true,pinch:true}
 });
-const cs=chart.addCandlestickSeries({upColor:'#00C805',downColor:'#FF5000',borderUpColor:'#00C805',borderDownColor:'#FF5000',wickUpColor:'#00C805',wickDownColor:'#FF5000'});
+const cs=chart.addCandlestickSeries({upColor:'#00C805',downColor:'#FF4444',borderUpColor:'#00C805',borderDownColor:'#FF4444',wickUpColor:'#00C805',wickDownColor:'#FF4444'});
 cs.setData(${JSON.stringify(data)});
 const vs=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'vol',scaleMargins:{top:0.8,bottom:0}});
 vs.setData(${JSON.stringify(volumeData)});

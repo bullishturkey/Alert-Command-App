@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { apiFetch, formatPrice, formatNumber, getChartHTML } from '../../utils/api';
+import { colors, spacing, radius } from '../../theme';
 
 let WebView: any = null;
 if (Platform.OS !== 'web') {
@@ -17,7 +18,7 @@ function StockChart({ html }: { html: string }) {
   if (WebView) {
     return <WebView testID="stock-chart-webview" source={{ html }} style={{ flex: 1, backgroundColor: 'transparent' }} scrollEnabled={false} javaScriptEnabled originWhitelist={['*']} />;
   }
-  return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><Text style={{ color: '#A1A1AA' }}>Chart unavailable</Text></View>;
+  return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><Text style={{ color: colors.textSecondary }}>Chart unavailable</Text></View>;
 }
 
 const TIMEFRAMES = ['1', '5', '15', '60', 'D'];
@@ -50,21 +51,21 @@ export default function StockDetailScreen() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const isPositive = quote ? quote.changePercent >= 0 : true;
-  const color = isPositive ? '#00C805' : '#FF5000';
+  const color = isPositive ? colors.green : colors.red;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity testID="stock-back-btn" onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color="#fff" />
+          <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerSymbol}>{symbol}</Text>
         <View style={{ width: 40 }} />
       </View>
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator size="large" color="#00C805" /></View>
+        <View style={styles.center}><ActivityIndicator size="large" color={colors.green} /></View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false}>
           {/* Price Section */}
@@ -73,8 +74,10 @@ export default function StockDetailScreen() {
               <Text style={styles.priceName}>{quote.name}</Text>
               <Text style={styles.priceValue}>${formatPrice(quote.price)}</Text>
               <View style={styles.changeRow}>
-                <Ionicons name={isPositive ? 'caret-up' : 'caret-down'} size={16} color={color} />
-                <Text style={[styles.changeValue, { color }]}>${Math.abs(quote.change).toFixed(2)} ({isPositive ? '+' : ''}{quote.changePercent.toFixed(2)}%)</Text>
+                <View style={[styles.changeBadge, { backgroundColor: isPositive ? colors.greenBg : colors.redBg }]}>
+                  <Ionicons name={isPositive ? 'caret-up' : 'caret-down'} size={12} color={color} />
+                  <Text style={[styles.changeValue, { color }]}>${Math.abs(quote.change).toFixed(2)} ({isPositive ? '+' : ''}{quote.changePercent.toFixed(2)}%)</Text>
+                </View>
                 <Text style={styles.changeLabel}>Today</Text>
               </View>
             </View>
@@ -103,11 +106,11 @@ export default function StockDetailScreen() {
               </View>
               <View style={styles.statItem}>
                 <Text style={styles.statLabel}>High</Text>
-                <Text style={[styles.statValue, { color: '#00C805' }]}>${formatPrice(quote.high)}</Text>
+                <Text style={[styles.statValue, { color: colors.green }]}>${formatPrice(quote.high)}</Text>
               </View>
               <View style={styles.statItem}>
                 <Text style={styles.statLabel}>Low</Text>
-                <Text style={[styles.statValue, { color: '#FF5000' }]}>${formatPrice(quote.low)}</Text>
+                <Text style={[styles.statValue, { color: colors.red }]}>${formatPrice(quote.low)}</Text>
               </View>
               <View style={styles.statItem}>
                 <Text style={styles.statLabel}>Prev Close</Text>
@@ -119,14 +122,17 @@ export default function StockDetailScreen() {
               </View>
               <View style={styles.statItem}>
                 <Text style={styles.statLabel}>Sentiment</Text>
-                <Text style={[styles.statValue, { color: quote.sentiment === 'bullish' ? '#00C805' : quote.sentiment === 'bearish' ? '#FF5000' : '#FFD60A' }]}>{quote.sentiment?.charAt(0).toUpperCase() + quote.sentiment?.slice(1)}</Text>
+                <Text style={[styles.statValue, { color: quote.sentiment === 'bullish' ? colors.green : quote.sentiment === 'bearish' ? colors.red : colors.yellow }]}>{quote.sentiment?.charAt(0).toUpperCase() + quote.sentiment?.slice(1)}</Text>
               </View>
             </View>
           )}
 
           {/* Indicators */}
           <View style={styles.indicatorsSection}>
-            <Text style={styles.sectionTitle}>Indicators</Text>
+            <View style={styles.indHeader}>
+              <Text style={styles.indPrefix}>⟩</Text>
+              <Text style={styles.indTitle}>Indicators</Text>
+            </View>
             <View style={styles.indicatorRow}>
               {['VWAP', 'RSI', 'MA 20', 'MA 50', 'EMA 9'].map(ind => (
                 <View key={ind} style={styles.indicatorChip}>
@@ -142,31 +148,33 @@ export default function StockDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#000' },
+  safe: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
-  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#1C1C1E', justifyContent: 'center', alignItems: 'center' },
-  headerSymbol: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  priceSection: { paddingHorizontal: 20, paddingBottom: 8 },
-  priceName: { color: '#A1A1AA', fontSize: 14, marginBottom: 4 },
-  priceValue: { color: '#fff', fontSize: 36, fontWeight: '700' },
-  changeRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 4 },
-  changeValue: { fontSize: 15, fontWeight: '600' },
-  changeLabel: { color: '#555', fontSize: 13, marginLeft: 8 },
-  chartContainer: { height: 300, marginHorizontal: 12, borderRadius: 12, overflow: 'hidden', backgroundColor: '#000' },
-  webview: { flex: 1, backgroundColor: 'transparent' },
-  tfRow: { flexDirection: 'row', justifyContent: 'center', paddingVertical: 14, gap: 10 },
-  tfBtn: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20, backgroundColor: '#1C1C1E' },
-  tfBtnActive: { backgroundColor: '#27272A', borderWidth: 1, borderColor: '#00C805' },
-  tfText: { color: '#A1A1AA', fontSize: 13, fontWeight: '600' },
-  tfTextActive: { color: '#00C805' },
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 20, gap: 10, marginBottom: 20 },
-  statItem: { width: '47%', backgroundColor: '#1C1C1E', borderRadius: 12, padding: 14 },
-  statLabel: { color: '#555', fontSize: 12, marginBottom: 4 },
-  statValue: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  indicatorsSection: { paddingHorizontal: 20, marginBottom: 30 },
-  sectionTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 10 },
-  indicatorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  indicatorChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: '#1C1C1E', borderWidth: 1, borderColor: '#27272A' },
-  indicatorText: { color: '#A1A1AA', fontSize: 13, fontWeight: '600' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  backBtn: { width: 38, height: 38, borderRadius: 10, backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  headerSymbol: { color: colors.textPrimary, fontSize: 18, fontWeight: '800' },
+  priceSection: { paddingHorizontal: spacing.xl, paddingBottom: spacing.sm },
+  priceName: { color: colors.textTertiary, fontSize: 13, marginBottom: 4, fontWeight: '500' },
+  priceValue: { color: colors.textPrimary, fontSize: 36, fontWeight: '800' },
+  changeRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: spacing.sm },
+  changeBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.sm, gap: 3 },
+  changeValue: { fontSize: 14, fontWeight: '600' },
+  changeLabel: { color: colors.textMuted, fontSize: 12 },
+  chartContainer: { height: 300, marginHorizontal: spacing.md, borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border },
+  tfRow: { flexDirection: 'row', justifyContent: 'center', paddingVertical: spacing.md, gap: spacing.sm },
+  tfBtn: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  tfBtnActive: { backgroundColor: colors.surfaceHover, borderColor: colors.green },
+  tfText: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
+  tfTextActive: { color: colors.green },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: spacing.xl, gap: spacing.sm, marginBottom: spacing.xl },
+  statItem: { width: '47%', backgroundColor: colors.surface, borderRadius: radius.md, padding: 14, borderWidth: 1, borderColor: colors.border },
+  statLabel: { color: colors.textMuted, fontSize: 11, marginBottom: 4, fontWeight: '600', letterSpacing: 0.3 },
+  statValue: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  indicatorsSection: { paddingHorizontal: spacing.xl, marginBottom: 30 },
+  indHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
+  indPrefix: { color: colors.green, fontSize: 18, fontWeight: '800' },
+  indTitle: { color: colors.textPrimary, fontSize: 16, fontWeight: '700' },
+  indicatorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  indicatorChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  indicatorText: { color: colors.textTertiary, fontSize: 12, fontWeight: '700' },
 });
