@@ -308,7 +308,7 @@ export default function DashboardScreen() {
 
       <FlatList
         testID="quotes-list"
-        data={quotes}
+        data={[...quotes].sort((a, b) => b.changePercent - a.changePercent)}
         keyExtractor={(item) => item.symbol}
         renderItem={renderStockCard}
         contentContainerStyle={styles.listContent}

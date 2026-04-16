@@ -88,13 +88,18 @@ export default function ChartsScreen() {
   }, []);
 
   const fetchData = useCallback(async () => {
+    // Don't clear chart while loading - keep old data visible
     setLoading(true);
     try {
       const [c, q] = await Promise.all([
         apiFetch(`/api/market/candles/${symbol}?resolution=${tf}&count=100`),
         apiFetch(`/api/market/quote/${symbol}`),
       ]);
-      setCandles(c); setQuote(q);
+      // Only update candles if we got valid data
+      if (c && c.t && c.t.length > 0) {
+        setCandles(c);
+      }
+      setQuote(q);
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }, [symbol, tf]);
 
@@ -217,9 +222,15 @@ export default function ChartsScreen() {
 
       {/* Chart */}
       <View style={s.chartWrap}>
-        {loading ? <View style={s.chartLoad}><ActivityIndicator size="large" color={colors.green} /></View>
-          : Platform.OS === 'web' ? <WebChart candles={candles} maConfig={maConfig} />
-          : <NativeChart html={getChartHTML(candles, symbol)} />}
+        {Platform.OS === 'web' ? <WebChart candles={candles} maConfig={maConfig} />
+          : candles ? <NativeChart html={getChartHTML(candles, symbol)} />
+          : <View style={s.chartLoad}><ActivityIndicator size="large" color={colors.green} /></View>}
+        {loading && candles && (
+          <View style={s.chartOverlay}><ActivityIndicator size="small" color={colors.green} /></View>
+        )}
+        {loading && !candles && (
+          <View style={s.chartLoad}><ActivityIndicator size="large" color={colors.green} /></View>
+        )}
       </View>
 
       {/* Timeframes */}
@@ -262,6 +273,7 @@ const s = StyleSheet.create({
   // Chart
   chartWrap: { width: SW, height: CHART_H, backgroundColor: '#000' },
   chartLoad: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  chartOverlay: { position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 8, padding: 6 },
   // Timeframes
   tfRow: { flexDirection: 'row', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 16, gap: 4 },
   tfBtn: { flex: 1, paddingVertical: 7, borderRadius: 6, alignItems: 'center' },
