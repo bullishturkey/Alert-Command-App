@@ -1,350 +1,279 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Platform, Dimensions, Modal, FlatList } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Platform, Dimensions, Modal, FlatList, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiFetch, formatPrice, formatNumber, getChartHTML } from '../../utils/api';
 import { colors, spacing, radius } from '../../theme';
 
 let WebView: any = null;
-if (Platform.OS !== 'web') {
-  WebView = require('react-native-webview').WebView;
-}
-
+if (Platform.OS !== 'web') { WebView = require('react-native-webview').WebView; }
 let LWC: any = null;
-if (Platform.OS === 'web') {
-  LWC = require('lightweight-charts');
-}
+if (Platform.OS === 'web') { LWC = require('lightweight-charts'); }
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
-const CHART_HEIGHT = Math.round(SCREEN_H * 0.48);
+const { width: SW, height: SH } = Dimensions.get('window');
+const CHART_H = Math.round(SH * 0.46);
 
 function NativeChart({ html }: { html: string }) {
-  if (WebView) {
-    return <WebView source={{ html }} style={{ flex: 1, backgroundColor: 'transparent' }} scrollEnabled={false} javaScriptEnabled originWhitelist={['*']} />;
-  }
-  return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><Text style={{ color: colors.textSecondary }}>Chart unavailable</Text></View>;
+  if (WebView) return <WebView source={{ html }} style={{ flex: 1, backgroundColor: 'transparent' }} scrollEnabled={false} javaScriptEnabled originWhitelist={['*']} />;
+  return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><Text style={{ color: '#666' }}>Chart unavailable</Text></View>;
 }
 
-function WebChart({ candles }: { candles: any }) {
-  const containerRef = useRef<View>(null);
+function WebChart({ candles, maConfig }: { candles: any; maConfig: number[] }) {
+  const ref = useRef<View>(null);
   const chartRef = useRef<any>(null);
-
   useEffect(() => {
-    if (Platform.OS !== 'web' || !LWC || !containerRef.current || !candles?.t?.length) return;
-    const node = containerRef.current as unknown as HTMLElement;
+    if (Platform.OS !== 'web' || !LWC || !ref.current || !candles?.t?.length) return;
+    const node = ref.current as unknown as HTMLElement;
     if (!node) return;
-
     if (chartRef.current) { try { chartRef.current.remove(); } catch {} chartRef.current = null; }
-
     try {
       const chart = LWC.createChart(node, {
-        width: node.clientWidth || SCREEN_W,
-        height: CHART_HEIGHT,
-        layout: { background: { type: 'solid', color: '#000' }, textColor: '#666', fontSize: 10 },
+        width: node.clientWidth || SW, height: CHART_H,
+        layout: { background: { type: 'solid', color: '#000' }, textColor: '#555', fontSize: 10 },
         grid: { vertLines: { color: '#0a0a0a' }, horzLines: { color: '#0a0a0a' } },
-        crosshair: {
-          mode: 0,
-          vertLine: { color: 'rgba(0,200,5,0.3)', width: 1, style: 0, labelBackgroundColor: '#00C805' },
-          horzLine: { color: 'rgba(0,200,5,0.3)', width: 1, style: 0, labelBackgroundColor: '#00C805' },
-        },
-        rightPriceScale: { borderColor: '#111', scaleMargins: { top: 0.05, bottom: 0.2 }, autoScale: true },
+        crosshair: { mode: 0, vertLine: { color: 'rgba(0,200,5,0.3)', width: 1, style: 0, labelBackgroundColor: '#00C805' }, horzLine: { color: 'rgba(0,200,5,0.3)', width: 1, style: 0, labelBackgroundColor: '#00C805' } },
+        rightPriceScale: { borderColor: '#111', scaleMargins: { top: 0.05, bottom: 0.2 } },
         timeScale: { borderColor: '#111', timeVisible: true, secondsVisible: false, barSpacing: 8 },
         handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
         handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
       });
       chartRef.current = chart;
-
-      const data = candles.t.map((time: number, i: number) => ({
-        time, open: candles.o[i], high: candles.h[i], low: candles.l[i], close: candles.c[i],
-      }));
-      const volData = candles.t.map((time: number, i: number) => ({
-        time, value: candles.v[i],
-        color: candles.c[i] >= candles.o[i] ? 'rgba(0,200,5,0.25)' : 'rgba(255,68,68,0.25)',
-      }));
-
-      const cs = chart.addCandlestickSeries({
-        upColor: '#00C805', downColor: '#FF4444',
-        borderUpColor: '#00C805', borderDownColor: '#FF4444',
-        wickUpColor: '#00A004', wickDownColor: '#CC3333',
-      });
+      const data = candles.t.map((t: number, i: number) => ({ time: t, open: candles.o[i], high: candles.h[i], low: candles.l[i], close: candles.c[i] }));
+      const volData = candles.t.map((t: number, i: number) => ({ time: t, value: candles.v[i], color: candles.c[i] >= candles.o[i] ? 'rgba(0,200,5,0.2)' : 'rgba(255,68,68,0.2)' }));
+      const cs = chart.addCandlestickSeries({ upColor: '#00C805', downColor: '#FF4444', borderUpColor: '#00C805', borderDownColor: '#FF4444', wickUpColor: '#00A004', wickDownColor: '#CC3333' });
       cs.setData(data);
-
-      // MA lines
-      const ma5 = chart.addLineSeries({ color: '#FFD60A', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-      const ma20 = chart.addLineSeries({ color: '#0A84FF', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-      const calcMA = (period: number) => {
+      const MA_COLORS = ['#FFD60A', '#FF4444', '#FFFFFF', '#0A84FF'];
+      maConfig.forEach((period, idx) => {
+        if (data.length < period) return;
+        const line = chart.addLineSeries({ color: MA_COLORS[idx % MA_COLORS.length], lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
         const result: any[] = [];
         for (let i = period - 1; i < data.length; i++) {
-          let sum = 0;
-          for (let j = 0; j < period; j++) sum += data[i - j].close;
+          let sum = 0; for (let j = 0; j < period; j++) sum += data[i - j].close;
           result.push({ time: data[i].time, value: sum / period });
         }
-        return result;
-      };
-      if (data.length >= 5) ma5.setData(calcMA(5));
-      if (data.length >= 20) ma20.setData(calcMA(20));
-
+        line.setData(result);
+      });
       if (volData.length > 0) {
         const vs = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'vol' });
-        vs.setData(volData);
-        chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+        vs.setData(volData); chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
       }
       chart.timeScale().fitContent();
-
-      const ro = new ResizeObserver(() => {
-        if (node.clientWidth > 0) chart.applyOptions({ width: node.clientWidth, height: CHART_HEIGHT });
-      });
+      const ro = new ResizeObserver(() => { if (node.clientWidth > 0) chart.applyOptions({ width: node.clientWidth, height: CHART_H }); });
       ro.observe(node);
       return () => { ro.disconnect(); try { chart.remove(); } catch {} chartRef.current = null; };
     } catch (e) { console.warn('Chart error:', e); }
-  }, [candles]);
-
-  return <View ref={containerRef} style={{ width: '100%', height: CHART_HEIGHT, backgroundColor: '#000' }} />;
+  }, [candles, maConfig]);
+  return <View ref={ref} style={{ width: '100%', height: CHART_H, backgroundColor: '#000' }} />;
 }
 
-const TIMEFRAMES = [
-  { key: '1', label: '1m' },
-  { key: '5', label: '5m' },
-  { key: '15', label: '15m' },
-  { key: '60', label: '1H' },
-  { key: 'D', label: '1D' },
-];
+const TIMEFRAMES = [{ key: '1', label: '1m' }, { key: '5', label: '5m' }, { key: '15', label: '15m' }, { key: '60', label: '1H' }, { key: 'D', label: '1D' }];
+const DEFAULT_MAS = [7, 21];
 
 export default function ChartsScreen() {
   const [symbol, setSymbol] = useState('NDX');
-  const [timeframe, setTimeframe] = useState('D');
+  const [tf, setTf] = useState('D');
   const [candles, setCandles] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [quote, setQuote] = useState<any>(null);
-  const [watchlistSymbols, setWatchlistSymbols] = useState<string[]>(['NDX']);
-  const [showSymbolPicker, setShowSymbolPicker] = useState(false);
+  const [watchlist, setWatchlist] = useState<string[]>(['NDX']);
+  const [showPicker, setShowPicker] = useState(false);
+  const [maConfig, setMaConfig] = useState<number[]>(DEFAULT_MAS);
+  const [showMaEdit, setShowMaEdit] = useState(false);
+  const [maInput, setMaInput] = useState('');
 
   useEffect(() => {
     (async () => {
-      try {
-        const data = await apiFetch('/api/watchlist');
-        const syms = data.symbols || [];
-        setWatchlistSymbols(['NDX', ...syms.filter((s: string) => s !== 'NDX')]);
-      } catch { setWatchlistSymbols(['NDX', 'QQQ', 'NVDA', 'MSFT', 'AAPL', 'AMZN', 'META', 'TSLA', 'AMD', 'AVGO', 'GOOGL']); }
+      try { const d = await apiFetch('/api/watchlist'); setWatchlist(['NDX', ...(d.symbols || []).filter((s: string) => s !== 'NDX')]); } catch {}
     })();
   }, []);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [candleData, quoteData] = await Promise.all([
-        apiFetch(`/api/market/candles/${symbol}?resolution=${timeframe}&count=100`),
+      const [c, q] = await Promise.all([
+        apiFetch(`/api/market/candles/${symbol}?resolution=${tf}&count=100`),
         apiFetch(`/api/market/quote/${symbol}`),
       ]);
-      setCandles(candleData);
-      setQuote(quoteData);
-    } catch (e) { console.error('Chart fetch error:', e); }
-    finally { setLoading(false); }
-  }, [symbol, timeframe]);
+      setCandles(c); setQuote(q);
+    } catch (e) { console.error(e); } finally { setLoading(false); }
+  }, [symbol, tf]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const isPositive = quote ? quote.changePercent >= 0 : true;
-  const accentColor = isPositive ? colors.green : colors.red;
+  const pos = quote ? quote.changePercent >= 0 : true;
+  const ac = pos ? colors.green : colors.red;
+  const li = candles?.t?.length ? candles.t.length - 1 : -1;
 
-  // OHLC from latest candle
-  const lastIdx = candles?.t?.length ? candles.t.length - 1 : -1;
-  const ohlc = lastIdx >= 0 ? {
-    o: candles.o[lastIdx], h: candles.h[lastIdx], l: candles.l[lastIdx], c: candles.c[lastIdx], v: candles.v[lastIdx],
-  } : null;
+  // Calculate current MA values
+  const maValues = maConfig.map(period => {
+    if (!candles?.c || candles.c.length < period) return null;
+    let sum = 0;
+    for (let i = candles.c.length - period; i < candles.c.length; i++) sum += candles.c[i];
+    return sum / period;
+  });
+
+  const MA_COLORS = ['#FFD60A', '#FF4444', '#FFFFFF', '#0A84FF'];
+
+  const addMA = () => {
+    const val = parseInt(maInput);
+    if (val > 0 && val <= 365 && !maConfig.includes(val)) {
+      setMaConfig([...maConfig, val]);
+    }
+    setMaInput('');
+  };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      {/* Symbol Picker Modal */}
-      <Modal visible={showSymbolPicker} animationType="slide" presentationStyle="formSheet" transparent>
-        <View style={styles.pickerOverlay}>
-          <View style={styles.pickerCard}>
-            <View style={styles.pickerHeader}>
-              <Text style={styles.pickerTitle}>Select Symbol</Text>
-              <TouchableOpacity onPress={() => setShowSymbolPicker(false)}>
-                <Ionicons name="close" size={22} color={colors.textSecondary} />
+    <SafeAreaView style={s.safe} edges={['top']}>
+      {/* Symbol Picker */}
+      <Modal visible={showPicker} transparent animationType="slide">
+        <View style={s.pickOverlay}>
+          <View style={s.pickCard}>
+            <View style={s.pickHead}><Text style={s.pickTitle}>Select Symbol</Text><TouchableOpacity onPress={() => setShowPicker(false)}><Ionicons name="close" size={22} color={colors.textSecondary} /></TouchableOpacity></View>
+            <FlatList data={watchlist} keyExtractor={i => i} renderItem={({ item }) => (
+              <TouchableOpacity style={[s.pickItem, symbol === item && s.pickItemOn]} onPress={() => { setSymbol(item); setShowPicker(false); }}>
+                <Text style={[s.pickSym, symbol === item && { color: colors.green }]}>{item}</Text>
+                {symbol === item && <Ionicons name="checkmark" size={18} color={colors.green} />}
               </TouchableOpacity>
-            </View>
-            <FlatList
-              data={watchlistSymbols}
-              keyExtractor={item => item}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[styles.pickerItem, symbol === item && styles.pickerItemActive]}
-                  onPress={() => { setSymbol(item); setShowSymbolPicker(false); }}
-                >
-                  <Text style={[styles.pickerSymbol, symbol === item && { color: colors.green }]}>{item}</Text>
-                  {symbol === item && <Ionicons name="checkmark" size={18} color={colors.green} />}
-                </TouchableOpacity>
-              )}
-            />
+            )} />
           </View>
         </View>
       </Modal>
 
-      {/* Header - Webull style */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.symbolBtn} onPress={() => setShowSymbolPicker(true)}>
-          <Text style={styles.symbolText}>{symbol}</Text>
-          <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
-        </TouchableOpacity>
-        <View style={styles.headerRight}>
-          <View style={styles.maLegend}>
-            <View style={[styles.maLegendDot, { backgroundColor: '#FFD60A' }]} />
-            <Text style={styles.maLegendText}>MA5</Text>
-            <View style={[styles.maLegendDot, { backgroundColor: '#0A84FF' }]} />
-            <Text style={styles.maLegendText}>MA20</Text>
+      {/* MA Editor Modal */}
+      <Modal visible={showMaEdit} transparent animationType="fade">
+        <View style={s.pickOverlay}>
+          <View style={[s.pickCard, { maxHeight: SH * 0.4 }]}>
+            <View style={s.pickHead}><Text style={s.pickTitle}>Edit Indicators</Text><TouchableOpacity onPress={() => setShowMaEdit(false)}><Ionicons name="close" size={22} color={colors.textSecondary} /></TouchableOpacity></View>
+            <View style={{ padding: 16 }}>
+              <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>Active Moving Averages:</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                {maConfig.map((ma, i) => (
+                  <View key={ma} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: MA_COLORS[i % MA_COLORS.length] + '40', gap: 6 }}>
+                    <View style={{ width: 8, height: 3, borderRadius: 1, backgroundColor: MA_COLORS[i % MA_COLORS.length] }} />
+                    <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: '700' }}>MA{ma}</Text>
+                    <TouchableOpacity onPress={() => setMaConfig(maConfig.filter(m => m !== ma))}><Ionicons name="close-circle" size={16} color={colors.textMuted} /></TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bg, borderRadius: 8, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12 }}>
+                  <Text style={{ color: colors.textMuted, fontSize: 13 }}>MA</Text>
+                  <TextInput placeholder="e.g. 50" placeholderTextColor={colors.textMuted} value={maInput} onChangeText={setMaInput} keyboardType="number-pad" style={{ flex: 1, color: '#fff', fontSize: 14, paddingVertical: 10, paddingHorizontal: 6 }} />
+                </View>
+                <TouchableOpacity onPress={addMA} style={{ backgroundColor: colors.green, borderRadius: 8, paddingHorizontal: 16, justifyContent: 'center' }}>
+                  <Text style={{ color: '#000', fontWeight: '700', fontSize: 13 }}>Add</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
-          <TouchableOpacity onPress={fetchData} style={styles.refreshBtn}>
-            <Ionicons name="refresh" size={16} color={colors.textSecondary} />
-          </TouchableOpacity>
         </View>
+      </Modal>
+
+      {/* Header */}
+      <View style={s.head}>
+        <TouchableOpacity style={s.symBtn} onPress={() => setShowPicker(true)}>
+          <Text style={s.symTxt}>{symbol}</Text>
+          <Ionicons name="chevron-down" size={14} color={colors.textMuted} />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={fetchData} style={s.refBtn}><Ionicons name="refresh" size={16} color={colors.textSecondary} /></TouchableOpacity>
       </View>
 
-      {/* Price Section */}
+      {/* Price + Stats - Webull layout */}
       {quote && (
-        <View style={styles.priceSection}>
-          <Text style={[styles.priceValue, { color: accentColor }]}>${formatPrice(quote.price)}</Text>
-          <View style={styles.priceChange}>
-            <Ionicons name={isPositive ? 'caret-up' : 'caret-down'} size={12} color={accentColor} />
-            <Text style={[styles.changeText, { color: accentColor }]}>
-              {isPositive ? '+' : ''}${Math.abs(quote.change).toFixed(2)}  ({isPositive ? '+' : ''}{quote.changePercent.toFixed(2)}%)
-            </Text>
+        <View style={s.priceRow}>
+          <View style={s.priceLeft}>
+            <Text style={[s.priceVal, { color: ac }]}>{formatPrice(quote.price)}</Text>
+            <View style={s.chgRow}>
+              <Ionicons name={pos ? 'caret-up' : 'caret-down'} size={11} color={ac} />
+              <Text style={[s.chgTxt, { color: ac }]}>{pos ? '+' : ''}{quote.change?.toFixed(2)}  {pos ? '+' : ''}{quote.changePercent?.toFixed(2)}%</Text>
+            </View>
           </View>
-          {quote.name && <Text style={styles.companyName} numberOfLines={1}>{quote.name}</Text>}
+          <View style={s.priceRight}>
+            <View style={s.statMini}><Text style={s.statMiniL}>High</Text><Text style={s.statMiniV}>{formatPrice(quote.high)}</Text></View>
+            <View style={s.statMini}><Text style={s.statMiniL}>Low</Text><Text style={s.statMiniV}>{formatPrice(quote.low)}</Text></View>
+            <View style={s.statMini}><Text style={s.statMiniL}>Vol</Text><Text style={s.statMiniV}>{formatNumber(quote.volume)}</Text></View>
+          </View>
         </View>
       )}
 
-      {/* Chart - Full Width, No Margins */}
-      <View style={styles.chartContainer}>
-        {loading ? (
-          <View style={styles.chartLoading}>
-            <ActivityIndicator size="large" color={colors.green} />
-          </View>
-        ) : Platform.OS === 'web' ? (
-          <WebChart candles={candles} />
-        ) : (
-          <NativeChart html={getChartHTML(candles, symbol)} />
-        )}
+      {/* Stats Grid */}
+      {quote && (
+        <View style={s.statsGrid}>
+          <View style={s.sg}><Text style={s.sgL}>Open</Text><Text style={s.sgV}>{formatPrice(quote.open)}</Text></View>
+          <View style={s.sg}><Text style={s.sgL}>Prev Close</Text><Text style={s.sgV}>{formatPrice(quote.previousClose)}</Text></View>
+        </View>
+      )}
+
+      {/* MA Indicator Labels */}
+      <TouchableOpacity style={s.maRow} onPress={() => setShowMaEdit(true)}>
+        <Text style={s.maLabel}>MA({maConfig.join(',')})</Text>
+        {maConfig.map((ma, i) => (
+          <Text key={ma} style={[s.maVal, { color: MA_COLORS[i % MA_COLORS.length] }]}>
+            MA{ma}:{maValues[i] != null ? maValues[i]!.toFixed(2) : '-'}
+          </Text>
+        ))}
+        <Ionicons name="settings-outline" size={12} color={colors.textMuted} style={{ marginLeft: 4 }} />
+      </TouchableOpacity>
+
+      {/* Chart */}
+      <View style={s.chartWrap}>
+        {loading ? <View style={s.chartLoad}><ActivityIndicator size="large" color={colors.green} /></View>
+          : Platform.OS === 'web' ? <WebChart candles={candles} maConfig={maConfig} />
+          : <NativeChart html={getChartHTML(candles, symbol)} />}
       </View>
 
-      {/* Timeframe Selector - Webull style */}
-      <View style={styles.timeframeRow}>
-        {TIMEFRAMES.map(tf => (
-          <TouchableOpacity
-            key={tf.key}
-            style={[styles.tfBtn, timeframe === tf.key && styles.tfBtnActive]}
-            onPress={() => setTimeframe(tf.key)}
-          >
-            <Text style={[styles.tfText, timeframe === tf.key && styles.tfTextActive]}>{tf.label}</Text>
+      {/* Timeframes */}
+      <View style={s.tfRow}>
+        {TIMEFRAMES.map(t => (
+          <TouchableOpacity key={t.key} style={[s.tfBtn, tf === t.key && s.tfOn]} onPress={() => setTf(t.key)}>
+            <Text style={[s.tfTxt, tf === t.key && s.tfTxtOn]}>{t.label}</Text>
           </TouchableOpacity>
         ))}
       </View>
-
-      {/* OHLC Data Bar */}
-      {ohlc && (
-        <View style={styles.ohlcRow}>
-          <View style={styles.ohlcItem}>
-            <Text style={styles.ohlcLabel}>O</Text>
-            <Text style={styles.ohlcValue}>{ohlc.o?.toFixed(2)}</Text>
-          </View>
-          <View style={styles.ohlcItem}>
-            <Text style={styles.ohlcLabel}>H</Text>
-            <Text style={[styles.ohlcValue, { color: colors.green }]}>{ohlc.h?.toFixed(2)}</Text>
-          </View>
-          <View style={styles.ohlcItem}>
-            <Text style={styles.ohlcLabel}>L</Text>
-            <Text style={[styles.ohlcValue, { color: colors.red }]}>{ohlc.l?.toFixed(2)}</Text>
-          </View>
-          <View style={styles.ohlcItem}>
-            <Text style={styles.ohlcLabel}>C</Text>
-            <Text style={[styles.ohlcValue, { color: ohlc.c >= ohlc.o ? colors.green : colors.red }]}>{ohlc.c?.toFixed(2)}</Text>
-          </View>
-          <View style={styles.ohlcItem}>
-            <Text style={styles.ohlcLabel}>Vol</Text>
-            <Text style={styles.ohlcValue}>{formatNumber(ohlc.v)}</Text>
-          </View>
-        </View>
-      )}
-
-      {/* Key Stats */}
-      {quote && (
-        <View style={styles.statsRow}>
-          <View style={styles.statBlock}>
-            <Text style={styles.statLabel}>Open</Text>
-            <Text style={styles.statValue}>${formatPrice(quote.open)}</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statBlock}>
-            <Text style={styles.statLabel}>High</Text>
-            <Text style={[styles.statValue, { color: colors.green }]}>${formatPrice(quote.high)}</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statBlock}>
-            <Text style={styles.statLabel}>Low</Text>
-            <Text style={[styles.statValue, { color: colors.red }]}>${formatPrice(quote.low)}</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statBlock}>
-            <Text style={styles.statLabel}>Prev</Text>
-            <Text style={styles.statValue}>${formatPrice(quote.previousClose)}</Text>
-          </View>
-        </View>
-      )}
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#000' },
-
-  // Header
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8 },
-  symbolBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.surface, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
-  symbolText: { color: colors.textPrimary, fontSize: 16, fontWeight: '800', letterSpacing: 0.5 },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  maLegend: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  maLegendDot: { width: 8, height: 2, borderRadius: 1 },
-  maLegendText: { color: colors.textMuted, fontSize: 9, fontWeight: '600' },
-  refreshBtn: { width: 30, height: 30, borderRadius: 8, backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border },
-
-  // Price
-  priceSection: { paddingHorizontal: 16, paddingBottom: 6 },
-  priceValue: { fontSize: 28, fontWeight: '800', letterSpacing: 0.3 },
-  priceChange: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
-  changeText: { fontSize: 13, fontWeight: '600' },
-  companyName: { color: colors.textMuted, fontSize: 11, marginTop: 2, fontWeight: '500' },
-
-  // Chart - edge to edge
-  chartContainer: { width: SCREEN_W, height: CHART_HEIGHT, backgroundColor: '#000', borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#0a0a0a' },
-  chartLoading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-
+  head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 6 },
+  symBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.surface, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
+  symTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  refBtn: { width: 30, height: 30, borderRadius: 8, backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border },
+  // Price row - Webull style
+  priceRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 4 },
+  priceLeft: { flex: 1 },
+  priceVal: { fontSize: 26, fontWeight: '800' },
+  chgRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 1 },
+  chgTxt: { fontSize: 12, fontWeight: '600' },
+  priceRight: { alignItems: 'flex-end', gap: 1 },
+  statMini: { flexDirection: 'row', gap: 8 },
+  statMiniL: { color: colors.textMuted, fontSize: 11, width: 30, textAlign: 'right' },
+  statMiniV: { color: '#ccc', fontSize: 11, fontWeight: '600', minWidth: 70, textAlign: 'right' },
+  // Stats grid
+  statsGrid: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 4, gap: 20 },
+  sg: { flexDirection: 'row', gap: 8 },
+  sgL: { color: colors.textMuted, fontSize: 10 },
+  sgV: { color: '#aaa', fontSize: 10, fontWeight: '600' },
+  // MA row
+  maRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 4, gap: 6, flexWrap: 'wrap' },
+  maLabel: { color: colors.textMuted, fontSize: 10 },
+  maVal: { fontSize: 10, fontWeight: '600' },
+  // Chart
+  chartWrap: { width: SW, height: CHART_H, backgroundColor: '#000' },
+  chartLoad: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   // Timeframes
-  timeframeRow: { flexDirection: 'row', justifyContent: 'center', paddingVertical: 10, paddingHorizontal: 16, gap: 4 },
-  tfBtn: { flex: 1, paddingVertical: 7, borderRadius: 6, alignItems: 'center', backgroundColor: 'transparent' },
-  tfBtnActive: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.green },
-  tfText: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
-  tfTextActive: { color: colors.green },
-
-  // OHLC
-  ohlcRow: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 6, gap: 2 },
-  ohlcItem: { flex: 1, alignItems: 'center' },
-  ohlcLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
-  ohlcValue: { color: colors.textSecondary, fontSize: 11, fontWeight: '600', marginTop: 1 },
-
-  // Stats
-  statsRow: { flexDirection: 'row', marginHorizontal: 16, backgroundColor: colors.surface, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: colors.border },
-  statBlock: { flex: 1, alignItems: 'center' },
-  statLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '600', letterSpacing: 0.3, marginBottom: 2 },
-  statValue: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
-  statDivider: { width: 1, backgroundColor: colors.border },
-
-  // Symbol Picker
-  pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  pickerCard: { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: SCREEN_H * 0.5, borderWidth: 1, borderColor: colors.border },
-  pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
-  pickerTitle: { color: colors.textPrimary, fontSize: 17, fontWeight: '700' },
-  pickerItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
-  pickerItemActive: { backgroundColor: colors.greenBg },
-  pickerSymbol: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  tfRow: { flexDirection: 'row', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 16, gap: 4 },
+  tfBtn: { flex: 1, paddingVertical: 7, borderRadius: 6, alignItems: 'center' },
+  tfOn: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.green },
+  tfTxt: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
+  tfTxtOn: { color: colors.green },
+  // Picker
+  pickOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  pickCard: { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: SH * 0.5, borderWidth: 1, borderColor: colors.border },
+  pickHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
+  pickTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  pickItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
+  pickItemOn: { backgroundColor: colors.greenBg },
+  pickSym: { color: '#fff', fontSize: 15, fontWeight: '700' },
 });

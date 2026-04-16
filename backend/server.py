@@ -722,6 +722,13 @@ async def create_alert(data: AlertCreate, user=Depends(get_admin_user)):
     await db.alerts.insert_one(alert)
     return {k: v for k, v in alert.items() if k != '_id'}
 
+@api_router.delete("/alerts/{alert_id}")
+async def delete_alert(alert_id: str, user=Depends(get_admin_user)):
+    result = await db.alerts.delete_one({'id': alert_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail='Alert not found')
+    return {'status': 'deleted'}
+
 @api_router.post("/alerts/webhook")
 async def webhook_alert(body: dict = Body(...)):
     """

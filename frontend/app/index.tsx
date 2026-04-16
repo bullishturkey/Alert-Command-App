@@ -112,7 +112,7 @@ export default function AuthScreen() {
 
             {isLogin && (
               <View style={styles.demoHint}>
-                <Text style={styles.demoText}>Demo: admin@ndxcommand.com / admin123</Text>
+                <Text style={styles.demoText}>New here? Sign up to get started</Text>
               </View>
             )}
           </View>
