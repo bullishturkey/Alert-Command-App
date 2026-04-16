@@ -416,8 +416,6 @@ async def get_all_quotes(user=Depends(get_current_user)):
 @api_router.get("/market/quote/{symbol}")
 async def get_quote(symbol: str, user=Depends(get_current_user)):
     symbol = symbol.upper()
-    if symbol not in TRACKED_SYMBOLS:
-        raise HTTPException(status_code=404, detail=f'Symbol {symbol} not tracked')
     if symbol == 'NDX':
         quote = await fetch_ndx_quote()
     else:
