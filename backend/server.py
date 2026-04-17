@@ -18,6 +18,7 @@ import random
 import math
 import json
 import asyncio
+import time
 from concurrent.futures import ThreadPoolExecutor
 import yfinance as yf
 
@@ -519,69 +520,97 @@ async def fetch_finnhub_earnings(from_date: str, to_date: str) -> list:
         logger.warning(f"Finnhub earnings error: {e}")
     return []
 
-async def fetch_fmp_economic_calendar(from_date: str, to_date: str) -> list:
-    """Fetch real economic calendar from Financial Modeling Prep.
-    Returns events with actual/forecast/previous values. Filters to US, medium+ impact."""
-    if not FMP_KEY:
+# In-memory cache for economic calendar (TTL: 30 min)
+# Key: "YYYY-MM-DD_YYYY-MM-DD"  → { 'ts': epoch_seconds, 'data': [events] }
+_ECON_CAL_CACHE: Dict[str, Dict[str, Any]] = {}
+_ECON_CAL_TTL_SEC = 1800  # 30 minutes
+
+async def fetch_finnhub_economic_calendar(from_date: str, to_date: str) -> list:
+    """Fetch real economic calendar from Finnhub.
+    Returns events with actual/forecast/previous values. Filters to US, medium+ impact.
+    Cached in-memory for 30 minutes per date range to conserve API quota.
+    """
+    if not FINNHUB_KEY:
         return []
+    # Check cache
+    cache_key = f"{from_date}_{to_date}"
+    now_ts = time.time()
+    cached = _ECON_CAL_CACHE.get(cache_key)
+    if cached and (now_ts - cached['ts'] < _ECON_CAL_TTL_SEC):
+        age_min = int((now_ts - cached['ts']) / 60)
+        logger.info(f"Econ calendar: CACHE HIT ({len(cached['data'])} events, age {age_min}m)")
+        return cached['data']
     try:
         async with httpx.AsyncClient(timeout=12) as client:
             resp = await client.get(
-                'https://financialmodelingprep.com/api/v3/economic_calendar',
-                params={'from': from_date, 'to': to_date, 'apikey': FMP_KEY}
+                'https://finnhub.io/api/v1/calendar/economic',
+                params={'from': from_date, 'to': to_date, 'token': FINNHUB_KEY}
             )
             if resp.status_code != 200:
-                logger.warning(f"FMP economic calendar HTTP {resp.status_code}: {resp.text[:200]}")
+                logger.warning(f"Finnhub economic calendar HTTP {resp.status_code}: {resp.text[:200]}")
+                if cached:
+                    return cached['data']
                 return []
-            raw = resp.json()
+            raw = resp.json().get('economicCalendar', [])
             if not isinstance(raw, list):
-                logger.warning(f"FMP economic calendar unexpected response: {str(raw)[:200]}")
+                if cached:
+                    return cached['data']
                 return []
             events = []
             for e in raw:
                 country = (e.get('country') or '').upper()
                 impact = (e.get('impact') or '').lower()
-                # Only US events, medium or high impact
-                if country not in ('US', 'USA', 'UNITED STATES'):
+                # Only US events, medium or high impact (skip speeches with no data)
+                if country != 'US':
                     continue
                 if impact not in ('medium', 'high'):
                     continue
-                # Date comes as "2026-04-18 12:30:00"
-                raw_date = e.get('date', '')
-                event_date = raw_date[:10] if raw_date else ''
+                raw_time = e.get('time', '')  # "2026-04-18 12:30:00"
+                event_date = raw_time[:10] if raw_time else ''
                 # Categorize for UI color coding
                 name = (e.get('event') or '').lower()
                 if 'fomc' in name or 'fed ' in name or 'federal funds' in name or 'powell' in name or 'interest rate' in name:
                     category = 'fed'
-                elif 'cpi' in name or 'ppi' in name or 'pce' in name or 'inflation' in name:
+                elif 'cpi' in name or 'ppi' in name or 'pce' in name or 'inflation' in name or 'price index' in name:
                     category = 'inflation'
-                elif 'payroll' in name or 'unemploy' in name or 'jobless' in name or 'jobs' in name or 'employment' in name:
+                elif 'payroll' in name or 'unemploy' in name or 'jobless' in name or 'adp' in name or 'employment' in name:
                     category = 'employment'
                 elif 'gdp' in name:
                     category = 'gdp'
                 elif 'retail' in name or 'consumer' in name:
                     category = 'consumer'
+                elif 'manufacturing' in name or 'ism' in name or 'pmi' in name:
+                    category = 'manufacturing'
+                elif 'housing' in name or 'home' in name or 'mortgage' in name or 'building' in name:
+                    category = 'housing'
                 else:
                     category = 'economic'
+                # Skip speeches unless they have actual data (usually noise)
+                if 'speech' in name and e.get('actual') is None and e.get('estimate') is None:
+                    continue
+                actual = e.get('actual')
+                estimate = e.get('estimate')
+                prev = e.get('prev')
                 events.append({
                     'event': e.get('event', '') or 'Economic Event',
                     'date': event_date,
-                    'time_utc': raw_date,
+                    'time_utc': raw_time,
                     'impact': impact,
                     'category': category,
-                    'estimate': str(e.get('estimate')) if e.get('estimate') is not None else '',
-                    'previous': str(e.get('previous')) if e.get('previous') is not None else '',
-                    'actual': str(e.get('actual')) if e.get('actual') is not None else '',
+                    'estimate': str(estimate) if estimate is not None else '',
+                    'previous': str(prev) if prev is not None else '',
+                    'actual': str(actual) if actual is not None else '',
                     'unit': e.get('unit', '') or '',
-                    'change': e.get('change'),
-                    'change_percent': e.get('changePercentage'),
-                    'description': f"{e.get('event', '')} — {country}"
+                    'description': f"{e.get('event', '')} — US"
                 })
             events.sort(key=lambda x: (x.get('date', ''), x.get('time_utc', '')))
-            logger.info(f"FMP economic calendar: {len(events)} US events fetched for {from_date} → {to_date}")
+            _ECON_CAL_CACHE[cache_key] = {'ts': now_ts, 'data': events}
+            logger.info(f"Econ calendar: FETCHED {len(events)} US events for {from_date} → {to_date} (cached 30m)")
             return events
     except Exception as e:
-        logger.warning(f"FMP economic calendar error: {e}")
+        logger.warning(f"Finnhub economic calendar error: {e}")
+        if cached:
+            return cached['data']
         return []
 
 def get_economic_events_for_week(today: datetime) -> list:
@@ -702,12 +731,12 @@ async def get_preflight(user=Depends(get_optional_user)):
     week_start = (now - timedelta(days=weekday)).strftime('%Y-%m-%d')
     week_end = (now + timedelta(days=(6 - weekday))).strftime('%Y-%m-%d')
 
-    # 1. Economic events this week — prefer live FMP data, fall back to hardcoded stubs
+    # 1. Economic events this week — prefer live Finnhub data, fall back to hardcoded stubs
     economic_events = []
     data_source = 'none'
-    if FMP_KEY:
-        economic_events = await fetch_fmp_economic_calendar(week_start, week_end)
-        data_source = 'fmp' if economic_events else 'fmp_empty'
+    if FINNHUB_KEY:
+        economic_events = await fetch_finnhub_economic_calendar(week_start, week_end)
+        data_source = 'live' if economic_events else 'live_empty'
     if not economic_events:
         economic_events = get_economic_events_for_week(now)
         if data_source == 'none':
