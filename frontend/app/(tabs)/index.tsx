@@ -257,16 +257,16 @@ export default function DashboardScreen() {
             <Text style={styles.ndxSentiment}>{ndxPositive ? 'BULLISH' : 'BEARISH'}</Text>
           </View>
           <View style={styles.ndxMain}>
-            <View>
-              <Text style={styles.ndxLabel}>NASDAQ 100</Text>
-              <Text style={styles.ndxSymbol}>NDX</Text>
+            <View style={styles.ndxMainLeft}>
+              <Text style={styles.ndxLabel} numberOfLines={1}>NASDAQ 100</Text>
+              <Text style={styles.ndxSymbol} numberOfLines={1}>NDX</Text>
             </View>
             <View style={styles.ndxPriceBlock}>
-              <Text style={styles.ndxPrice}>${formatPrice(ndx.price)}</Text>
+              <Text style={styles.ndxPrice} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>${formatPrice(ndx.price)}</Text>
               <View style={[styles.ndxChangeBadge, { backgroundColor: ndxPositive ? colors.greenBgStrong : colors.redBgStrong }]}>
-                <Ionicons name={ndxPositive ? 'caret-up' : 'caret-down'} size={12} color={ndxColor} />
-                <Text style={[styles.ndxChangeText, { color: ndxColor }]}>{ndxPositive ? '+' : ''}{ndx.changePercent.toFixed(2)}%</Text>
-                <Text style={[styles.ndxChangeAbs, { color: ndxColor }]}>({ndxPositive ? '+' : ''}${ndx.change.toFixed(2)})</Text>
+                <Ionicons name={ndxPositive ? 'caret-up' : 'caret-down'} size={11} color={ndxColor} />
+                <Text style={[styles.ndxChangeText, { color: ndxColor }]} numberOfLines={1}>{ndxPositive ? '+' : ''}{ndx.changePercent.toFixed(2)}%</Text>
+                <Text style={[styles.ndxChangeAbs, { color: ndxColor }]} numberOfLines={1}>{ndxPositive ? '+' : ''}${Math.abs(ndx.change).toFixed(2)}</Text>
               </View>
             </View>
           </View>
@@ -324,6 +324,14 @@ export default function DashboardScreen() {
             </TouchableOpacity>
           </View>
         }
+        ListFooterComponent={
+          <View style={styles.footerDisclaimer}>
+            <Ionicons name="information-circle-outline" size={12} color={colors.textMuted} />
+            <Text style={styles.footerDisclaimerText}>
+              For informational purposes only. Not financial advice. Market data may be delayed.
+            </Text>
+          </View>
+        }
       />
     </SafeAreaView>
   );
@@ -351,14 +359,15 @@ const styles = StyleSheet.create({
   ndxLiveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.green },
   ndxLiveText: { color: colors.green, fontSize: 9, fontWeight: '800', letterSpacing: 1 },
   ndxSentiment: { color: colors.textTertiary, fontSize: 10, fontWeight: '700', letterSpacing: 1 },
-  ndxMain: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: spacing.lg },
+  ndxMain: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: spacing.lg, gap: spacing.md },
+  ndxMainLeft: { flexShrink: 1 },
   ndxLabel: { color: colors.textTertiary, fontSize: 11, fontWeight: '600', letterSpacing: 0.5 },
-  ndxSymbol: { color: colors.textPrimary, fontSize: 28, fontWeight: '800', marginTop: 2 },
-  ndxPriceBlock: { alignItems: 'flex-end' },
-  ndxPrice: { color: colors.textPrimary, fontSize: 28, fontWeight: '800' },
-  ndxChangeBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.sm, marginTop: 4, gap: 4 },
-  ndxChangeText: { fontSize: 13, fontWeight: '700' },
-  ndxChangeAbs: { fontSize: 11, fontWeight: '500' },
+  ndxSymbol: { color: colors.textPrimary, fontSize: 24, fontWeight: '800', marginTop: 2 },
+  ndxPriceBlock: { alignItems: 'flex-end', flexShrink: 0 },
+  ndxPrice: { color: colors.textPrimary, fontSize: 22, fontWeight: '800' },
+  ndxChangeBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.sm, marginTop: 6, gap: 5, flexWrap: 'nowrap' },
+  ndxChangeText: { fontSize: 12, fontWeight: '700' },
+  ndxChangeAbs: { fontSize: 11, fontWeight: '600', opacity: 0.85 },
   ndxStats: { flexDirection: 'row', backgroundColor: colors.bg, borderRadius: radius.sm, padding: spacing.md, borderWidth: 1, borderColor: colors.borderSubtle },
   ndxStat: { flex: 1, alignItems: 'center' },
   ndxStatLabel: { color: colors.textMuted, fontSize: 10, fontWeight: '600', marginBottom: 2, letterSpacing: 0.3 },
@@ -392,6 +401,10 @@ const styles = StyleSheet.create({
   emptyText: { color: colors.textTertiary, fontSize: 14 },
   emptyAddBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.green, paddingHorizontal: 16, paddingVertical: 10, borderRadius: radius.pill, gap: 4 },
   emptyAddText: { color: '#000', fontSize: 14, fontWeight: '700' },
+
+  // Footer Disclaimer
+  footerDisclaimer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.sm, opacity: 0.6 },
+  footerDisclaimerText: { color: colors.textMuted, fontSize: 10, fontWeight: '500', textAlign: 'center', flexShrink: 1 },
 
   // Add Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: spacing.xxl },
