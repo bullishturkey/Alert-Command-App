@@ -100,7 +100,7 @@ export default function AlertsScreen() {
         </View>
         {item.message && item.message !== item.title && item.message !== item.price && <Text style={st.cardMsg}>{item.message}</Text>}
         <View style={st.cardBot}>
-          <View style={st.srcRow}><Ionicons name="pulse" size={11} color={colors.textMuted} /><Text style={st.srcTxt}>{item.created_by || 'NDX Command'}</Text></View>
+          <View style={st.srcRow}><Ionicons name="pulse" size={11} color={colors.textMuted} /><Text style={st.srcTxt}>{item.created_by || 'Alerts Command'}</Text></View>
           <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
             {newest && <View style={st.newBadge}><Text style={st.newTxt}>NEW</Text></View>}
             {isAdmin && (

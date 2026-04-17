@@ -230,7 +230,7 @@ export default function DashboardScreen() {
         <View style={styles.headerLeft}>
           <Image source={require('../../assets/ndx-logo.png')} style={styles.headerLogo} resizeMode="contain" />
           <View>
-            <Text style={styles.greeting}>NDX Command</Text>
+            <Text style={styles.greeting}>Alerts Command</Text>
             <Text style={styles.subtitle}>Welcome, {user?.username}</Text>
           </View>
         </View>

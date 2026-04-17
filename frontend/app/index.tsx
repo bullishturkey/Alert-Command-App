@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, typography } from '../theme';
 
 export default function AuthScreen() {
-  const { user, isLoading, login, register } = useAuth();
+  const { user, isLoading, isGuest, login, register, continueAsGuest } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
@@ -23,7 +23,7 @@ export default function AuthScreen() {
     );
   }
 
-  if (user) return null;
+  if (user || isGuest) return null;
 
   const handleSubmit = async () => {
     if (!email || !password || (!isLogin && !username)) {
@@ -54,7 +54,7 @@ export default function AuthScreen() {
             <View style={styles.logoGlow}>
               <Image source={require('../assets/ndx-logo.png')} style={styles.logoImage} resizeMode="contain" />
             </View>
-            <Text style={styles.brandName}>NDX Command</Text>
+            <Text style={styles.brandName}>Alerts Command</Text>
             <Text style={styles.brandTagline}>THE TRADING INTELLIGENCE PLATFORM.</Text>
             <Text style={styles.brandDesc}>Real-time NDX tracking, AI sentiment analysis,{'\n'}and community-driven trade intelligence.</Text>
           </View>
@@ -116,6 +116,16 @@ export default function AuthScreen() {
               </View>
             )}
           </View>
+
+          {/* Guest Access */}
+          <TouchableOpacity style={styles.guestBtn} onPress={continueAsGuest} activeOpacity={0.7}>
+            <Ionicons name="eye-outline" size={18} color={colors.textSecondary} />
+            <Text style={styles.guestBtnText}>Browse as Guest</Text>
+          </TouchableOpacity>
+          <Text style={styles.guestHint}>View market data without an account</Text>
+
+          {/* Disclaimer */}
+          <Text style={styles.disclaimer}>Alerts Command is an independent, third-party tool.{'\n'}Not affiliated with Nasdaq, Inc. or any stock exchange.</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -163,4 +173,9 @@ const styles = StyleSheet.create({
 
   demoHint: { marginTop: spacing.lg, alignItems: 'center' },
   demoText: { color: colors.textMuted, fontSize: 11, letterSpacing: 0.3 },
+
+  guestBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 24, paddingVertical: 14, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  guestBtnText: { color: colors.textSecondary, fontSize: 15, fontWeight: '600' },
+  guestHint: { color: colors.textMuted, fontSize: 11, textAlign: 'center', marginTop: 8 },
+  disclaimer: { color: colors.textMuted, fontSize: 10, textAlign: 'center', marginTop: 24, lineHeight: 15, opacity: 0.6 },
 });

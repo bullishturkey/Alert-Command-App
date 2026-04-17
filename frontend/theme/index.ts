@@ -1,5 +1,5 @@
 /**
- * NDX Command - Design System
+ * Alerts Command - Design System
  * Inspired by openclaw.ai aesthetic with Green accent
  */
 

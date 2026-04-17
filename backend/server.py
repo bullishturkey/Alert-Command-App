@@ -1,4 +1,4 @@
-"""NDX Command - Trading Intelligence Platform Backend"""
+"""Alerts Command - Trading Intelligence Platform Backend"""
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Body, Query
 from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
@@ -34,7 +34,7 @@ WEBHOOK_SECRET = os.environ.get('WEBHOOK_SECRET', '')
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
 # === APP SETUP ===
-app = FastAPI(title="NDX Command API")
+app = FastAPI(title="Alerts Command API")
 api_router = APIRouter(prefix="/api")
 mongo_client = AsyncIOMotorClient(mongo_url)
 db = mongo_client[db_name]
@@ -110,11 +110,27 @@ async def get_current_user(authorization: str = Header(None)):
         user = await db.users.find_one({'id': payload['sub']}, {'_id': 0, 'password_hash': 0})
         if not user:
             raise HTTPException(status_code=401, detail='User not found')
+        if user.get('is_revoked'):
+            raise HTTPException(status_code=403, detail='Account access has been revoked')
         return user
     except pyjwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail='Token expired')
     except pyjwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail='Invalid token')
+
+async def get_optional_user(authorization: str = Header(None)):
+    """Returns user if authenticated, None if guest"""
+    if not authorization or not authorization.startswith('Bearer '):
+        return None
+    token = authorization.split(' ')[1]
+    try:
+        payload = pyjwt.decode(token, JWT_SECRET, algorithms=['HS256'])
+        user = await db.users.find_one({'id': payload['sub']}, {'_id': 0, 'password_hash': 0})
+        if user and user.get('is_revoked'):
+            return None
+        return user
+    except Exception:
+        return None
 
 async def get_admin_user(user=Depends(get_current_user)):
     if not user.get('is_admin'):
@@ -386,15 +402,15 @@ async def get_me(user=Depends(get_current_user)):
 # MARKET DATA ENDPOINTS
 # =====================
 @api_router.get("/market/ndx")
-async def get_ndx_live(user=Depends(get_current_user)):
-    """Fast NDX-only endpoint with 5s cache for real-time tracking"""
+async def get_ndx_live(user=Depends(get_optional_user)):
+    """Fast NDX-only endpoint with 5s cache - available to guests"""
     quote = await fetch_ndx_quote()
     if not quote:
         quote = generate_mock_quote('NDX')
     return quote
 
 @api_router.get("/market/quotes")
-async def get_all_quotes(user=Depends(get_current_user)):
+async def get_all_quotes(user=Depends(get_optional_user)):
     global _quote_cache, _quote_cache_time
     import time
     now = time.time()
@@ -417,7 +433,7 @@ async def get_all_quotes(user=Depends(get_current_user)):
     return {'quotes': quotes, 'cached': False}
 
 @api_router.get("/market/quote/{symbol}")
-async def get_quote(symbol: str, user=Depends(get_current_user)):
+async def get_quote(symbol: str, user=Depends(get_optional_user)):
     symbol = symbol.upper()
     if symbol == 'NDX':
         quote = await fetch_ndx_quote()
@@ -429,7 +445,7 @@ async def get_quote(symbol: str, user=Depends(get_current_user)):
     return quote
 
 @api_router.get("/market/candles/{symbol}")
-async def get_candles(symbol: str, resolution: str = 'D', count: int = 100, user=Depends(get_current_user)):
+async def get_candles(symbol: str, resolution: str = "D", count: int = 100, user=Depends(get_optional_user)):
     symbol = symbol.upper()
     if symbol == 'NDX':
         candles = await fetch_ndx_candles(resolution, count)
@@ -445,7 +461,7 @@ async def get_candles(symbol: str, resolution: str = 'D', count: int = 100, user
 # NEWS ENDPOINTS
 # =====================
 @api_router.get("/news")
-async def get_news(user=Depends(get_current_user)):
+async def get_news(user=Depends(get_optional_user)):
     finnhub_news = await fetch_finnhub_news()
     if finnhub_news and len(finnhub_news) > 0:
         articles = []
@@ -612,7 +628,7 @@ def get_economic_events_for_week(today: datetime) -> list:
     return events
 
 @api_router.get("/preflight")
-async def get_preflight(user=Depends(get_current_user)):
+async def get_preflight(user=Depends(get_optional_user)):
     """Daily preflight briefing: economic calendar, earnings, breaking news"""
     now = datetime.now(timezone.utc)
     today_str = now.strftime('%Y-%m-%d')
@@ -701,7 +717,7 @@ async def add_economic_event(body: dict = Body(...), user=Depends(get_admin_user
 # ALERT ENDPOINTS (NDX Trading Pipeline)
 # =====================
 @api_router.get("/alerts")
-async def get_alerts(user=Depends(get_current_user)):
+async def get_alerts(user=Depends(get_optional_user)):
     """Get NDX trading alerts - only from webhook pipeline and admin"""
     alerts = await db.alerts.find(
         {'source': {'$in': ['webhook', 'pipedream', 'tradingview', 'admin', 'signal']}},
@@ -771,7 +787,7 @@ async def webhook_alert(body: dict = Body(...)):
         'severity': 'high',
         'source': 'webhook',
         'price': price,
-        'created_by': 'NDX Command',
+        'created_by': 'Alerts Command',
         'created_at': datetime.now(timezone.utc).isoformat(),
     }
     await db.alerts.insert_one(alert)
@@ -842,7 +858,7 @@ async def unregister_push_token(user=Depends(get_current_user)):
 # CHAT ENDPOINTS
 # =====================
 @api_router.get("/chat/channels")
-async def get_channels(user=Depends(get_current_user)):
+async def get_channels(user=Depends(get_optional_user)):
     channels = await db.channels.find({}, {'_id': 0}).to_list(20)
     return {'channels': channels}
 
@@ -909,7 +925,7 @@ def extract_video_embed_url(url: str) -> dict:
     return {'embed_url': url, 'thumbnail': '', 'platform': 'direct', 'video_id': ''}
 
 @api_router.get("/videos")
-async def get_videos(category: str = '', user=Depends(get_current_user)):
+async def get_videos(category: str = "", user=Depends(get_optional_user)):
     query = {}
     if category:
         query['category'] = category
@@ -943,7 +959,7 @@ async def delete_video(video_id: str, user=Depends(get_admin_user)):
     return {'status': 'deleted'}
 
 @api_router.get("/videos/categories")
-async def get_video_categories(user=Depends(get_current_user)):
+async def get_video_categories(user=Depends(get_optional_user)):
     categories = await db.videos.distinct('category')
     return {'categories': categories or ['General', 'Beginner', 'Strategy', 'Technical Analysis', 'Advanced']}
 
@@ -996,7 +1012,7 @@ async def remove_from_watchlist(body: dict = Body(...), user=Depends(get_current
     return {'status': 'removed', 'symbol': symbol}
 
 @api_router.get("/market/quote-multi")
-async def get_multi_quotes(symbols: str = '', user=Depends(get_current_user)):
+async def get_multi_quotes(symbols: str = "", user=Depends(get_optional_user)):
     """Fetch quotes for a list of comma-separated symbols"""
     if not symbols:
         return {'quotes': []}
@@ -1048,7 +1064,7 @@ _ai_sentiment_cache_time: float = 0
 AI_SENTIMENT_CACHE_TTL = 300  # 5 minutes
 
 @api_router.get("/ai/sentiment")
-async def get_ai_sentiment(user=Depends(get_current_user)):
+async def get_ai_sentiment(user=Depends(get_optional_user)):
     """AI-powered market sentiment analysis using Claude"""
     global _ai_sentiment_cache, _ai_sentiment_cache_time
     import time as _time
@@ -1210,6 +1226,69 @@ async def get_stats(user=Depends(get_admin_user)):
     video_count = await db.videos.count_documents({})
     return {'users': user_count, 'alerts': alert_count, 'messages': message_count, 'videos': video_count}
 
+# =====================
+# ACCOUNT DELETION
+# =====================
+@api_router.delete("/auth/account")
+async def delete_account(user=Depends(get_current_user)):
+    """Permanently delete user account and all associated data"""
+    user_id = user['id']
+    # Delete all user data
+    await db.users.delete_one({'id': user_id})
+    await db.watchlists.delete_many({'user_id': user_id})
+    await db.push_tokens.delete_many({'user_id': user_id})
+    await db.messages.delete_many({'author_id': user_id})
+    logger.info(f"Account deleted: {user.get('email', user_id)}")
+    return {'status': 'deleted', 'message': 'Your account and all associated data have been permanently deleted.'}
+
+# =====================
+# ADMIN: USER MANAGEMENT
+# =====================
+@api_router.get("/admin/users")
+async def admin_list_users(user=Depends(get_admin_user)):
+    """Admin: List all registered users"""
+    users = await db.users.find({}, {'_id': 0, 'password_hash': 0}).sort('created_at', -1).to_list(500)
+    return {'users': users, 'total': len(users)}
+
+@api_router.put("/admin/users/{user_id}/revoke")
+async def admin_revoke_user(user_id: str, user=Depends(get_admin_user)):
+    """Admin: Revoke user access"""
+    target = await db.users.find_one({'id': user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail='User not found')
+    if target.get('is_admin'):
+        raise HTTPException(status_code=400, detail='Cannot revoke admin access')
+    await db.users.update_one({'id': user_id}, {'$set': {'is_revoked': True, 'revoked_at': datetime.now(timezone.utc).isoformat(), 'revoked_by': user['id']}})
+    # Remove push tokens for revoked user
+    await db.push_tokens.delete_many({'user_id': user_id})
+    logger.info(f"User revoked: {target.get('email', user_id)} by admin {user.get('email')}")
+    return {'status': 'revoked', 'user_id': user_id}
+
+@api_router.put("/admin/users/{user_id}/restore")
+async def admin_restore_user(user_id: str, user=Depends(get_admin_user)):
+    """Admin: Restore revoked user access"""
+    target = await db.users.find_one({'id': user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail='User not found')
+    await db.users.update_one({'id': user_id}, {'$set': {'is_revoked': False}, '$unset': {'revoked_at': '', 'revoked_by': ''}})
+    logger.info(f"User restored: {target.get('email', user_id)} by admin {user.get('email')}")
+    return {'status': 'restored', 'user_id': user_id}
+
+@api_router.delete("/admin/users/{user_id}")
+async def admin_delete_user(user_id: str, user=Depends(get_admin_user)):
+    """Admin: Permanently delete a user"""
+    target = await db.users.find_one({'id': user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail='User not found')
+    if target.get('is_admin'):
+        raise HTTPException(status_code=400, detail='Cannot delete admin account')
+    await db.users.delete_one({'id': user_id})
+    await db.watchlists.delete_many({'user_id': user_id})
+    await db.push_tokens.delete_many({'user_id': user_id})
+    await db.messages.delete_many({'author_id': user_id})
+    logger.info(f"User deleted by admin: {target.get('email', user_id)}")
+    return {'status': 'deleted', 'user_id': user_id}
+
 # === INCLUDE ROUTER & MIDDLEWARE ===
 app.include_router(api_router)
 app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -1221,7 +1300,7 @@ PRIVACY_POLICY_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NDX Command - Privacy Policy</title>
+<title>Alerts Command - Privacy Policy</title>
 <style>
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:800px;margin:0 auto;padding:24px;background:#0a0a0a;color:#e0e0e0;line-height:1.7}
 h1{color:#00C805;font-size:28px;margin-bottom:4px}
@@ -1236,7 +1315,7 @@ a{color:#00C805}
 <p class="updated">Last updated: April 2026</p>
 
 <h2>1. Introduction</h2>
-<p>NDX Command ("we", "our", "the App") is a trading intelligence platform that provides market data, alerts, and educational content for the Nasdaq-100 trading community. We respect your privacy and are committed to protecting your personal information.</p>
+<p>Alerts Command ("we", "our", "the App") is a trading intelligence platform that provides market data, alerts, and educational content for the Nasdaq-100 trading community. We respect your privacy and are committed to protecting your personal information.</p>
 
 <h2>2. Information We Collect</h2>
 <p><strong>Account Information:</strong> When you register, we collect your email address, username, and a securely hashed password.</p>
@@ -1282,7 +1361,7 @@ TERMS_OF_SERVICE_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NDX Command - Terms of Service</title>
+<title>Alerts Command - Terms of Service</title>
 <style>
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:800px;margin:0 auto;padding:24px;background:#0a0a0a;color:#e0e0e0;line-height:1.7}
 h1{color:#00C805;font-size:28px;margin-bottom:4px}
@@ -1298,13 +1377,13 @@ a{color:#00C805}
 <h1>Terms of Service</h1>
 <p class="updated">Last updated: April 2026</p>
 
-<div class="warning"><p><strong>⚠️ Disclaimer:</strong> NDX Command is an informational tool only. Nothing in this App constitutes financial advice. Always consult a licensed financial advisor before making investment decisions.</p></div>
+<div class="warning"><p><strong>⚠️ Disclaimer:</strong> Alerts Command is an informational tool only. Nothing in this App constitutes financial advice. Always consult a licensed financial advisor before making investment decisions.</p></div>
 
 <h2>1. Acceptance of Terms</h2>
-<p>By using NDX Command, you agree to be bound by these Terms of Service. If you do not agree, do not use the App.</p>
+<p>By using Alerts Command, you agree to be bound by these Terms of Service. If you do not agree, do not use the App.</p>
 
 <h2>2. Description of Service</h2>
-<p>NDX Command provides real-time market data, trade alerts, AI-powered market analysis, educational content, and community tools for Nasdaq-100 traders.</p>
+<p>Alerts Command provides real-time market data, trade alerts, AI-powered market analysis, educational content, and community tools for Nasdaq-100 traders.</p>
 
 <h2>3. No Financial Advice</h2>
 <p>All market data, AI sentiment analysis, suggested trends, and alerts provided by the App are for <strong>informational and educational purposes only</strong>. They do not constitute investment advice, financial advice, or trading recommendations.</p>
@@ -1319,7 +1398,7 @@ a{color:#00C805}
 <p>Market data is provided by third-party sources (Finnhub, Yahoo Finance) and may be delayed or inaccurate. We do not guarantee the accuracy, completeness, or timeliness of any market data.</p>
 
 <h2>7. Limitation of Liability</h2>
-<p>NDX Command shall not be liable for any financial losses, damages, or other liabilities arising from your use of the App or reliance on information provided within it.</p>
+<p>Alerts Command shall not be liable for any financial losses, damages, or other liabilities arising from your use of the App or reliance on information provided within it.</p>
 
 <h2>8. Termination</h2>
 <p>We reserve the right to terminate or suspend your account at our discretion, without notice, for conduct that we believe violates these Terms.</p>
@@ -1348,16 +1427,93 @@ async def api_privacy_policy():
 async def api_terms_of_service():
     return TERMS_OF_SERVICE_HTML
 
+SUPPORT_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alerts Command - Support</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:800px;margin:0 auto;padding:24px;background:#0a0a0a;color:#e0e0e0;line-height:1.7}
+h1{color:#00C805;font-size:28px;margin-bottom:4px}
+h2{color:#00C805;font-size:18px;margin-top:32px;border-bottom:1px solid #222;padding-bottom:8px}
+p,li{font-size:14px;color:#b0b0b0}
+.updated{font-size:12px;color:#666;margin-bottom:32px}
+a{color:#00C805}
+.faq{background:#111;border:1px solid #222;border-radius:12px;padding:16px 20px;margin:12px 0}
+.faq h3{color:#fff;font-size:15px;margin:0 0 8px 0}
+.faq p{margin:0;font-size:13px}
+.contact-card{background:#0a1f0a;border:1px solid rgba(0,200,5,0.2);border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.contact-card h3{color:#00C805;margin:0 0 8px 0}
+</style>
+</head>
+<body>
+<h1>Support Center</h1>
+<p class="updated">Alerts Command — Trading Intelligence Platform</p>
+
+<h2>Frequently Asked Questions</h2>
+
+<div class="faq">
+<h3>What is Alerts Command?</h3>
+<p>Alerts Command is an independent, third-party trading intelligence app that provides real-time market data, trade alerts, AI-powered sentiment analysis, and educational content for Nasdaq-100 traders. We are NOT affiliated with, endorsed by, or connected to Nasdaq, Inc. or any stock exchange.</p>
+</div>
+
+<div class="faq">
+<h3>How do I receive push notifications?</h3>
+<p>Create an account, then enable push notifications in the Settings tab. You'll receive real-time trade alerts directly to your device.</p>
+</div>
+
+<div class="faq">
+<h3>Is the market data real-time?</h3>
+<p>We source data from Finnhub and Yahoo Finance. Most data is near real-time, though some may have a brief delay depending on the data provider.</p>
+</div>
+
+<div class="faq">
+<h3>Is this financial advice?</h3>
+<p>No. Alerts Command is an informational tool only. All market data, AI analysis, and alerts are for educational purposes. Always consult a licensed financial advisor before making investment decisions.</p>
+</div>
+
+<div class="faq">
+<h3>How do I delete my account?</h3>
+<p>Go to Settings in the app and tap "Delete My Account." This will permanently remove your account and all associated data including watchlists and push notification tokens.</p>
+</div>
+
+<div class="faq">
+<h3>Can I use the app without an account?</h3>
+<p>Yes! You can browse market data, charts, and news as a guest. An account is only needed to receive personalized alerts and manage a custom watchlist.</p>
+</div>
+
+<div class="contact-card">
+<h3>Need More Help?</h3>
+<p>Contact our support team at <a href="mailto:support@alertscommand.com">support@alertscommand.com</a></p>
+<p style="margin-top:8px;font-size:12px;color:#666">We typically respond within 24-48 hours.</p>
+</div>
+
+<h2>App Information</h2>
+<p><strong>Version:</strong> 1.0</p>
+<p><strong>Platform:</strong> iOS</p>
+<p><strong>Category:</strong> Finance</p>
+<p>Alerts Command is an independent application. All trademarks belong to their respective owners.</p>
+</body>
+</html>"""
+
+@app.get("/support", response_class=HTMLResponse)
+async def support_page():
+    return SUPPORT_HTML
+
+@app.get("/api/support", response_class=HTMLResponse)
+async def api_support_page():
+    return SUPPORT_HTML
+
 # === STARTUP ===
 @app.on_event("startup")
 async def startup():
     # Seed admin
-    admin = await db.users.find_one({'email': 'admin@ndxcommand.com'})
+    admin = await db.users.find_one({'email': 'admin@alertscommand.com'})
     if not admin:
         await db.users.insert_one({
             'id': str(uuid.uuid4()),
-            'email': 'admin@ndxcommand.com',
-            'username': 'NDX Admin',
+            'email': 'admin@alertscommand.com',
+            'username': 'Admin',
             'password_hash': hash_password('admin123'),
             'is_admin': True,
             'created_at': datetime.now(timezone.utc).isoformat()
@@ -1382,16 +1538,16 @@ async def startup():
     if alert_count == 0:
         now = datetime.now(timezone.utc)
         seed_alerts = [
-            {'id': str(uuid.uuid4()), 'title': 'NDX ALERT: Bullish Divergence', 'message': 'Bullish divergence forming on RSI. Possible bounce from VWAP support.', 'type': 'bullish', 'ticker': 'NDX', 'severity': 'high', 'created_by': 'NDX Admin', 'created_at': (now - timedelta(hours=2)).isoformat()},
-            {'id': str(uuid.uuid4()), 'title': 'NVDA: Breakout Watch', 'message': 'NVDA approaching key resistance at $148. Watch for volume confirmation.', 'type': 'bullish', 'ticker': 'NVDA', 'severity': 'medium', 'created_by': 'NDX Admin', 'created_at': (now - timedelta(hours=5)).isoformat()},
-            {'id': str(uuid.uuid4()), 'title': 'TSLA: Support Test', 'message': 'Tesla testing 50-day moving average support. Bearish below $255.', 'type': 'bearish', 'ticker': 'TSLA', 'severity': 'medium', 'created_by': 'NDX Admin', 'created_at': (now - timedelta(hours=8)).isoformat()},
-            {'id': str(uuid.uuid4()), 'title': 'Macro Alert: CPI Release Tomorrow', 'message': 'CPI data releasing tomorrow at 8:30 AM ET. Expect volatility.', 'type': 'info', 'ticker': '', 'severity': 'high', 'created_by': 'NDX Admin', 'created_at': (now - timedelta(hours=12)).isoformat()},
-            {'id': str(uuid.uuid4()), 'title': 'QQQ: Key Level at $515', 'message': 'QQQ holding above $515 support. Bullish above, bearish breakdown below.', 'type': 'neutral', 'ticker': 'QQQ', 'severity': 'medium', 'created_by': 'NDX Admin', 'created_at': (now - timedelta(hours=15)).isoformat()},
+            {'id': str(uuid.uuid4()), 'title': 'NDX ALERT: Bullish Divergence', 'message': 'Bullish divergence forming on RSI. Possible bounce from VWAP support.', 'type': 'bullish', 'ticker': 'NDX', 'severity': 'high', 'created_by': 'Admin', 'created_at': (now - timedelta(hours=2)).isoformat()},
+            {'id': str(uuid.uuid4()), 'title': 'NVDA: Breakout Watch', 'message': 'NVDA approaching key resistance at $148. Watch for volume confirmation.', 'type': 'bullish', 'ticker': 'NVDA', 'severity': 'medium', 'created_by': 'Admin', 'created_at': (now - timedelta(hours=5)).isoformat()},
+            {'id': str(uuid.uuid4()), 'title': 'TSLA: Support Test', 'message': 'Tesla testing 50-day moving average support. Bearish below $255.', 'type': 'bearish', 'ticker': 'TSLA', 'severity': 'medium', 'created_by': 'Admin', 'created_at': (now - timedelta(hours=8)).isoformat()},
+            {'id': str(uuid.uuid4()), 'title': 'Macro Alert: CPI Release Tomorrow', 'message': 'CPI data releasing tomorrow at 8:30 AM ET. Expect volatility.', 'type': 'info', 'ticker': '', 'severity': 'high', 'created_by': 'Admin', 'created_at': (now - timedelta(hours=12)).isoformat()},
+            {'id': str(uuid.uuid4()), 'title': 'QQQ: Key Level at $515', 'message': 'QQQ holding above $515 support. Bullish above, bearish breakdown below.', 'type': 'neutral', 'ticker': 'QQQ', 'severity': 'medium', 'created_by': 'Admin', 'created_at': (now - timedelta(hours=15)).isoformat()},
         ]
         await db.alerts.insert_many(seed_alerts)
         logger.info("Alerts seeded")
 
-    logger.info("NDX Command backend started successfully")
+    logger.info("Alerts Command backend started successfully")
 
 @app.on_event("shutdown")
 async def shutdown():

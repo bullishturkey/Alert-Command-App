@@ -40,22 +40,23 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
 }
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, isGuest } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
-  // Register for push notifications when authenticated
+  // Register for push notifications when authenticated (not guest)
   useNotifications(!!user);
 
   useEffect(() => {
     if (isLoading) return;
     const inAuthGroup = segments[0] === '(tabs)' || segments[0] === 'admin' || segments[0] === 'stock';
-    if (!user && inAuthGroup) {
+    const authenticated = !!user || isGuest;
+    if (!authenticated && inAuthGroup) {
       router.replace('/');
-    } else if (user && segments.length <= 1 && !inAuthGroup) {
+    } else if (authenticated && segments.length <= 1 && !inAuthGroup) {
       router.replace('/(tabs)');
     }
-  }, [user, isLoading, segments]);
+  }, [user, isGuest, isLoading, segments]);
 
   if (isLoading) {
     return (

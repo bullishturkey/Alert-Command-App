@@ -9,7 +9,7 @@ import { apiFetch } from '../../utils/api';
 import { colors, spacing, radius } from '../../theme';
 
 export default function SettingsScreen() {
-  const { user, logout } = useAuth();
+  const { user, logout, isGuest, deleteAccount } = useAuth();
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
   const [checkingPush, setCheckingPush] = useState(true);
@@ -86,6 +86,28 @@ export default function SettingsScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign Out', style: 'destructive', onPress: logout },
     ]);
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'This will permanently delete your account and all associated data (watchlists, push tokens, messages). This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Permanently',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteAccount();
+              Alert.alert('Account Deleted', 'Your account has been permanently deleted.');
+            } catch (e: any) {
+              Alert.alert('Error', e.message || 'Failed to delete account');
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -179,10 +201,24 @@ export default function SettingsScreen() {
 
         {/* Sign Out */}
         <View style={st.section}>
-          <TouchableOpacity style={st.logoutBtn} onPress={handleLogout} activeOpacity={0.7}>
-            <Ionicons name="log-out-outline" size={20} color={colors.red} />
-            <Text style={st.logoutTxt}>Sign Out</Text>
-          </TouchableOpacity>
+          {user && (
+            <>
+              <TouchableOpacity style={st.logoutBtn} onPress={handleLogout} activeOpacity={0.7}>
+                <Ionicons name="log-out-outline" size={20} color={colors.red} />
+                <Text style={st.logoutTxt}>Sign Out</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={st.deleteBtn} onPress={handleDeleteAccount} activeOpacity={0.7}>
+                <Ionicons name="trash-outline" size={18} color={colors.red} />
+                <Text style={st.deleteTxt}>Delete My Account</Text>
+              </TouchableOpacity>
+            </>
+          )}
+          {isGuest && (
+            <TouchableOpacity style={st.signInBtn} onPress={logout} activeOpacity={0.7}>
+              <Ionicons name="log-in-outline" size={20} color={colors.green} />
+              <Text style={st.signInTxt}>Sign In / Create Account</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={{ height: 40 }} />
@@ -231,4 +267,8 @@ const st = StyleSheet.create({
   // Logout
   logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.redBg, borderRadius: 16, paddingVertical: 16, borderWidth: 1, borderColor: 'rgba(255,68,68,0.15)' },
   logoutTxt: { color: colors.red, fontSize: 16, fontWeight: '700' },
+  deleteBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 16, paddingVertical: 14, marginTop: 12, borderWidth: 1, borderColor: 'rgba(255,68,68,0.1)' },
+  deleteTxt: { color: colors.red, fontSize: 14, fontWeight: '600', opacity: 0.7 },
+  signInBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.greenBg, borderRadius: 16, paddingVertical: 16, borderWidth: 1, borderColor: 'rgba(0,200,5,0.15)' },
+  signInTxt: { color: colors.green, fontSize: 16, fontWeight: '700' },
 });

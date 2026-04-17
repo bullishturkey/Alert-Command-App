@@ -15,9 +15,12 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   isLoading: boolean;
+  isGuest: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  continueAsGuest: () => void;
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
@@ -26,6 +29,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isGuest, setIsGuest] = useState(false);
 
   useEffect(() => {
     loadToken();
@@ -33,7 +37,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadToken = async () => {
     try {
-      const saved = await AsyncStorage.getItem('ndx_auth_token');
+      const saved = await AsyncStorage.getItem('ac_auth_token');
+      const guestMode = await AsyncStorage.getItem('ac_guest_mode');
       if (saved) {
         const resp = await fetch(`${API_URL}/api/auth/me`, {
           headers: { Authorization: `Bearer ${saved}` },
@@ -43,8 +48,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(data.user);
           setToken(saved);
         } else {
-          await AsyncStorage.removeItem('ndx_auth_token');
+          await AsyncStorage.removeItem('ac_auth_token');
+          if (guestMode === 'true') setIsGuest(true);
         }
+      } else if (guestMode === 'true') {
+        setIsGuest(true);
       }
     } catch (e) {
       console.error('Auth load error:', e);
@@ -64,9 +72,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error(err.detail || 'Login failed');
     }
     const data = await resp.json();
-    await AsyncStorage.setItem('ndx_auth_token', data.token);
+    await AsyncStorage.setItem('ac_auth_token', data.token);
+    await AsyncStorage.removeItem('ac_guest_mode');
     setToken(data.token);
     setUser(data.user);
+    setIsGuest(false);
   }, []);
 
   const register = useCallback(async (email: string, username: string, password: string) => {
@@ -80,19 +90,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error(err.detail || 'Registration failed');
     }
     const data = await resp.json();
-    await AsyncStorage.setItem('ndx_auth_token', data.token);
+    await AsyncStorage.setItem('ac_auth_token', data.token);
+    await AsyncStorage.removeItem('ac_guest_mode');
     setToken(data.token);
     setUser(data.user);
+    setIsGuest(false);
   }, []);
 
   const logout = useCallback(async () => {
-    await AsyncStorage.removeItem('ndx_auth_token');
+    await AsyncStorage.removeItem('ac_auth_token');
+    await AsyncStorage.removeItem('ac_guest_mode');
     setToken(null);
     setUser(null);
+    setIsGuest(false);
   }, []);
 
+  const continueAsGuest = useCallback(() => {
+    AsyncStorage.setItem('ac_guest_mode', 'true');
+    setIsGuest(true);
+  }, []);
+
+  const deleteAccount = useCallback(async () => {
+    if (!token) return;
+    const resp = await fetch(`${API_URL}/api/auth/account`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: 'Failed to delete account' }));
+      throw new Error(err.detail || 'Failed to delete account');
+    }
+    await AsyncStorage.removeItem('ac_auth_token');
+    await AsyncStorage.removeItem('ac_guest_mode');
+    setToken(null);
+    setUser(null);
+    setIsGuest(false);
+  }, [token]);
+
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, token, isLoading, isGuest, login, register, logout, continueAsGuest, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   );
