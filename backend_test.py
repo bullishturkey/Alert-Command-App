@@ -6,7 +6,7 @@ import uuid
 import json
 import requests
 
-BASE_URL = "https://trading-signals-269.preview.emergentagent.com/api"
+BASE_URL = "https://market-preflight.preview.emergentagent.com/api"
 
 ADMIN_EMAIL = "admin@alertscommand.com"
 ADMIN_PASSWORD = "admin123"

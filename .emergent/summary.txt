@@ -1,49 +1,62 @@
 <analysis>**original_problem_statement**: 
-Initial user request: Build a mobile-first trading intelligence platform designed for a trading community. 
-**Pivot/Updated Product Requirements (Latest Messages)**: The user's app was rejected by the Apple App Store Review (Guidelines 5.1.1v, 5.1.1, 4.1b, 1.5). The user requested to completely rebrand the app from NDX Command to Alerts Command to avoid copycat rejections. Added requirements include: implementing a Guest Mode (allowing users to access non-account-based features like market data freely), adding an Account Deletion flow, introducing admin controls to view users and revoke their access, and generating legal Support/Privacy pages. Additionally, the user requested the integration of an AI Market Sentiment Agent in the Preflight tab, bug fixes for the charts timeframe UI, and sorting the custom watchlist by percentage change.
+Initial user request: Build a mobile-first trading intelligence platform designed for a trading community.
+**Updated Product Requirements**: The user required rebranding the app to Alerts Command to pass Apple App Store review, implementing Guest Mode, Account Deletion, Admin user management, and Legal pages. Most recently, the user requested fixes for UI layout issues on the Markets and Charts tabs (values bunching up), adding a Nasdaq non-affiliation disclaimer, fixing the Economic Calendar (which was previously hardcoded placeholders), and debugging missing alerts from TradingView/Pipedream webhooks.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
 **what currently exists?**: 
-A fully functional React Native (Expo) + FastAPI application rebranded as Alerts Command. It includes JWT Auth with a newly implemented Guest Mode for browsing market data without logging in. The Dashboard features a Custom Watchlist (sorted highest-to-lowest % change). The Charts tab uses  with a fixed loading overlay that prevents visual resetting. The Alerts tab displays signals without TradingView branding and includes Admin edit/delete controls. The Preflight tab integrates Claude AI (via Emergent LLM key) to generate live market sentiment. A Settings tab includes Push Notification toggles and an Apple-compliant Delete Account flow. Admin controls allow revoking user access. Built-in HTML endpoints serve the Privacy Policy and Terms of Service.
+A fully functional React Native (Expo) + FastAPI application branded as Alerts Command. Features include JWT Auth with Guest Mode, Dashboard (Custom Watchlist, NDX quotes), Charts (), Alerts (Admin managed, Webhook integrated), Settings (Push, Account Deletion), and a Preflight tab. The Preflight tab features Claude AI-generated market sentiment and a live Economic Calendar fetching data from Finnhub with a 30-minute in-memory cache. 
 
-**Last working item**:
-- **Last item agent was working**: Resolving Apple App Store review rejections. The agent globally renamed the app to Alerts Command, implemented a Guest Mode (unlocked endpoints for unauthenticated users), added account deletion, added admin user-revocation controls, updated the  to disable iPad support (), and generated Privacy Policy/Terms of Service HTML endpoints.
-- **Status**: USER VERIFICATION PENDING (User needs to trigger a new EAS build and submit a screen recording to Apple)
-- **Agent Testing Done**: Y (Backend testing agent passed; screenshots taken for frontend validation)
-- **Which testing method agent to use?**: NA (Testing is already done, pending user deployment)
+**Last working item**: 
+- **Last item agent was working**: Integrating real live data into the Economic Calendar. The agent successfully replaced hardcoded placeholders with the Finnhub Economic Calendar API, adding a 30-minute in-memory cache to conserve API limits, and displaying actual/estimate/previous values for US economic events.
+- **Status**: USER VERIFICATION PENDING
+- **Agent Testing Done**: Y (Backend testing agent passed 13/13 checks for the new Finnhub calendar integration)
+- **Which testing method agent to use?**: NA (Testing already done)
 - **User Testing Done**: N
 
 **All Pending/In progress Issue list**:  
-None. All App Store rejection issues, deployment config issues, and UI bugs (chart timeframes, watchlist sorting) were resolved.
+  Issue 1: Update Webhook URL in TradingView/Pipedream
+     - Attempted fixes: The agent diagnosed that webhooks stopped arriving because the environment preview URL changes upon forking.
+     - Next debug checklist: Inform the user they must update their TradingView and Pipedream configurations to point to the *current* environment's  URL. 
+     - Why fix this issue and what will be achieved with the fix? It restores the flow of live trade signals into the app.
+     - Status: USER VERIFICATION PENDING
+     - Is recurring issue? Y (Occurs on every environment fork)
+     - Should Test frontend/backend/both after fix? NA (User configuration step)
+     - Blocked on other issue: None
+
+  Issue 2: App Name locked in Emergent EAS Build UI
+     - Attempted fixes: The App name field in the Emergent iOS Build dialog is locked to NDX ALERTS, which risks Apple rejection. The agent drafted an email for the user to send to Emergent Support.
+     - Next debug checklist: Await user confirmation that Support has reset their build configuration, or guide them through migrating to a new deployment if Support instructs them to do so.
+     - Why fix this issue and what will be achieved with the fix? Required to generate a clean EAS build under the Alerts Command brand.
+     - Status: BLOCKED (Waiting on Emergent Support / User action)
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? NA
+     - Blocked on other issue: None
 
 **In progress Task List**: 
 None. 
 
 **Upcoming and Future Tasks**:
   Future Tasks:
+  - P2: Replace  with Finnhub or Polygon.io for NDX index data to ensure strict commercial licensing compliance before official App Store launch.
   - P2: Broker API Integrations (Phase 2 - Charles Schwab, Alpaca, Interactive Brokers).
   - P3: Conversational AI Trading Assistant for natural language trade commands (Phase 3).
 
 **Completed work in this session**
-- Integrated Claude AI Sentiment Analysis in Preflight tab (, ) (DONE)
-- Rebranded globally from NDX Command to Alerts Command to pass Apple review (DONE)
-- Added Guest Mode allowing non-account users to view market data (, , ) (DONE)
-- Added Account Deletion flow for Apple compliance (, ) (DONE)
-- Added Admin user management to view and revoke user access () (DONE)
-- Fixed Charts tab timeframe reverting visually by adding a loading overlay () (DONE)
-- Fixed Watchlist sorting to organize by % change highest-to-lowest () (DONE)
-- Removed TradingView/Pipedream source branding from Alerts (, ) (DONE)
-- Generated HTML endpoints for Privacy Policy and Terms of Service () (DONE)
-- Fixed  hex color warnings and changed  to  for iPad exemption (DONE)
+- Fixed NDX box layout on Markets tab (reduced font, added , dropped decimals for Open/High/Low/Prev to prevent bunching) () (DONE)
+- Fixed Charts tab High/Low/Vol top-right layout to prevent text wrapping () (DONE)
+- Added Not affiliated with Nasdaq... disclaimers to both Markets and Charts tabs (, ) (DONE)
+- Verified complete codebase rebranding to Alerts Command and replaced internal JWT secret string () (DONE)
+- Drafted App Store Connect Beta App Description, Support URL guidance, and Content Rights advice (DONE)
+- Replaced hardcoded Economic Calendar with live Finnhub API integration, including 30-minute in-memory caching and real actual/estimate/previous values () (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-- None
+None.
 
 **Known issue recurrence from previous fork**
-- Issue recurrence in previous fork: None
-- Recurrence count: 0
-- Status: NOT STARTED
+  - Issue recurrence in previous fork: Webhook URL disconnection due to preview URL changes upon environment fork.
+  - Recurrence count: 1
+  - Status: USER VERIFICATION PENDING
 
 **Code Architecture**
 
@@ -52,69 +65,63 @@ None.
 - React Native (Expo) & Expo Router.
 - FastAPI (Python) & MongoDB.
 - Claude AI Integration via  (Emergent LLM Key).
-- EAS Build / Cloudbuild configurations.
-- App Store Connect compliance (Guideline 5.1.1v Account Deletion, Guest Mode).
+- Webhook pipeline for external trade alerts.
+- API caching mechanisms (30-minute in-memory cache for Finnhub economic data).
 
 **key DB schema**
-  - : , , , , ,  (New)
+  - : , , , , , 
   - : uid=0(root) gid=0(root) groups=0(root), , , , , , , , , , 
-  - : , 
-  - : uid=0(root) gid=0(root) groups=0(root), , , , , 
-
+  - : (Legacy hardcoded fallback collection)
+  
 **changes in tech stack**
-  - Added  to the backend for Claude AI prompt handling.
+  - Finnhub API is now utilized for  in addition to market quotes. FMP API key slot was added but left dormant.
 
 **All files of reference** 
-  - : Central backend file. Now contains logic for AI Sentiment (), Account Deletion (), Admin User Revocation (), and Legal HTML endpoints.
-  - :  explicitly set to  to bypass Apple's 13-inch iPad screenshot requirement.
-  - : New tab created for account deletion and push notification toggles.
-  - : Updated to handle Continue as Guest state seamlessly.
+  - : Contains the newly implemented  with  and TTL logic.
+  - : Updated for decimal rounding on Market stats and Disclaimer footer.
+  - : Layout fixes for mini-stats and disclaimer footer.
 
 **Areas that need refactoring**:
--  is now roughly 1,400 lines long. With the addition of legal HTML pages, AI sentiment, admin user management, and alerts, it should strongly be considered for modular routing (e.g., breaking out into , ) in future jobs.
+-  is ~1,600 lines long. Modular routing (e.g., breaking out into , , ) is strongly recommended for future maintenance.
 
 **key api endpoints**
-- : Uses Claude AI to analyze market news and output formatted JSON sentiment.
-- : Deletes the authenticated user's account.
-- : Revokes a user's access (Admin only).
-- : Edits an existing alert.
-- : Serves the static HTML Privacy Policy.
-- : Serves the static HTML Terms of Service.
+- : Fetches AI Market sentiment AND live Finnhub Economic Calendar data with actuals/estimates.
+- : Receives payloads from TradingView/Pipedream to generate alerts.
 
 **Critical Info for New Agent** 
-- **Rebranding**: The application is no longer NDX Command. It is strictly **Alerts Command**.
-- **Admin Credentials Changed**: The seeded admin account is now **** (Password: ).
-- **Guest Flow**: Unauthenticated users can now browse the dashboard, charts, and preflight tabs. They will be prompted to sign in if they try to access alerts or restricted settings. Do not accidentally block the  endpoints behind  without accounting for the guest allowance logic.
+- **Webhook URLs**: The preview URL changes every time a job is forked. The user relies on Pipedream/TradingView webhooks. You must explicitly instruct the user to update their webhook destination to the *new* environment preview URL if they want to test alerts. NEVER put the preview URL in this summary file.
+- **EAS Build Lock**: The user is currently blocked by an Emergent platform limitation where the iOS App Name is locked to NDX ALERTS. They have emailed Support. Do not alter  name properties, as the frontend code is completely correct.
 
 **documents and test reports created in this job**
-  -  (Updated with new admin email)
-  - 
+  -  (Backend testing passed 13/13)
+  -  (Admin:  / )
 
 **Last 10 User Messages and any pending HUMAN messages** 
-1. (Completed) I am ready to publish
-2. (Completed) Yes we need to implement all of these into the next version. We also need to remove the pipedream and trading view text out of the alerts page.
-3. (Completed) P1 is fine and let’s try just in preflight. I would like for you to remove TradingView and pipedream text... want to see a setting tab... admin section that allows me to edit and send out alerts...
-4. (Completed) On the charts page the time frame reverts back to 1D even when I choose 1m can we fix that also on the watch list I would like for them to be organized by highest to lowest movement...
-5. (Completed) *User shared EAS Build error logs regarding missing proxy URLs*
-6. (Completed) *User shared EAS Build warning logs regarding  hex colors*
-7. (Completed) Should we fork?
-8. (Completed) *User shared App Store rejection logs (Guideline 5.1.1, 4.1b, 1.5) requiring Account deletion, guest mode, privacy URL, name change, and iPad screenshots.*
-9. (Completed) Generate one for me [privacy policy]
-10. (Completed) Let’s change the apps name to Alerts Command. Also we should make it that adding an account without sign in should simply remove the ability to receive alerts... I also need a way to monitor account holders and revoke access...
+1. (Completed) I will work on that go ahead and start with option a free tier [FMP for econ calendar]
+2. (Completed) apikey=Zf2y6zaNgx5mU1jgfWzNAkjqrGUDwvz1 we need to request it in a smart way like one every hour or 30min
+3. (Completed) Tell things need to be fixed. One the economic calendar is not updating nor is it posting the actual. I also am not getting alerts from TradingView and Pipedream.
+4. (Completed) What is the support url?
+5. (Completed) Do I need any content rights?
+6. (Completed) Beta app description
+7. (Completed) Can you reach out to support for me and send them what’s needed or create an email for me to copy and send
+8. (Completed) *User shared screenshot of locked EAS App Name NDX ALERTS*
+9. (Completed) The new name should be Alerts Command everywhere I don’t want to get hit with copycat again
+10. (Completed) How can I change the name of the app?
 
 **Project Health Check:**
 - Broken: None. 
-- Mocked: None. 
+- Mocked: The Economic Calendar has an automatic fallback to mocked/stubbed DB data *only* if the Finnhub API fails or the key is missing.
 
 **3rd Party Integrations** 
-  • Finnhub (Market Data / News) — requires User API Key
+  • Finnhub (Market Data / News / Economic Calendar) — requires User API Key
   • yfinance (Index Data) — No key required
   • Claude (AI Sentiment Agent) — uses Emergent LLM Key ()
+  • Financial Modeling Prep (FMP) — API key stored in  but currently unused/dormant.
 
 **Testing status**
-  - Testing agent used after significant changes: YES (Backend testing completed with 100% success on new routes).
-  - Troubleshoot agent used after agent stuck in loop: NO (Support agent was used frequently to guide the user on EAS build logs, App Store review, and Forking).
-  - Test files created: Updated backend test suites.
+  - Testing agent used after significant changes: YES (Backend testing completed with 100% success on Finnhub route).
+  - Troubleshoot agent used after agent stuck in loop: NO.
+  - Test files created: None.
   - Known regressions: None.
 
 **Credentials to test flow:**
@@ -122,7 +129,11 @@ None.
   - Password: 
 
 **What agent forgot to execute**
-- The agent accomplished all user requests perfectly, including fixing the complex App Store review issues. No missed tasks. 
+- Nothing was forgotten. The agent successfully addressed all UI layout adjustments, disclaimers, webhook diagnosis, and economic calendar replacements.
 
 **Debugging checklist for current issue**
-N/A - Application is fully stable and waiting for the user to initiate an EAS deployment from the Emergent platform and re-submit to Apple.</analysis>
+    Issue: Webhooks from TradingView not arriving
+    Frontend files to check: None
+    Backend files to check:  (line 750 )
+    Database to check: 
+    Action: Supply the current environment's preview URL with  appended to it to the user so they can update their TradingView config.</analysis>
