@@ -273,22 +273,22 @@ export default function DashboardScreen() {
           <View style={styles.ndxStats}>
             <View style={styles.ndxStat}>
               <Text style={styles.ndxStatLabel} numberOfLines={1}>Open</Text>
-              <Text style={styles.ndxStatValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>${formatPrice(ndx.open)}</Text>
+              <Text style={styles.ndxStatValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>${Math.round(ndx.open).toLocaleString()}</Text>
             </View>
             <View style={styles.ndxStatDivider} />
             <View style={styles.ndxStat}>
               <Text style={styles.ndxStatLabel} numberOfLines={1}>High</Text>
-              <Text style={[styles.ndxStatValue, { color: colors.green }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>${formatPrice(ndx.high)}</Text>
+              <Text style={[styles.ndxStatValue, { color: colors.green }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>${Math.round(ndx.high).toLocaleString()}</Text>
             </View>
             <View style={styles.ndxStatDivider} />
             <View style={styles.ndxStat}>
               <Text style={styles.ndxStatLabel} numberOfLines={1}>Low</Text>
-              <Text style={[styles.ndxStatValue, { color: colors.red }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>${formatPrice(ndx.low)}</Text>
+              <Text style={[styles.ndxStatValue, { color: colors.red }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>${Math.round(ndx.low).toLocaleString()}</Text>
             </View>
             <View style={styles.ndxStatDivider} />
             <View style={styles.ndxStat}>
               <Text style={styles.ndxStatLabel} numberOfLines={1}>Prev</Text>
-              <Text style={styles.ndxStatValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>${formatPrice(ndx.previousClose)}</Text>
+              <Text style={styles.ndxStatValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>${Math.round(ndx.previousClose).toLocaleString()}</Text>
             </View>
           </View>
         </TouchableOpacity>
