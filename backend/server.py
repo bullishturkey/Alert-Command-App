@@ -28,6 +28,7 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 db_name = os.environ.get('DB_NAME', 'ndx_command')
 FINNHUB_KEY = os.environ.get('FINNHUB_API_KEY', '')
+FMP_KEY = os.environ.get('FMP_API_KEY', '')
 JWT_SECRET = os.environ.get('JWT_SECRET', 'alerts-command-jwt-secret-2026-secure')
 WEBHOOK_SECRET = os.environ.get('WEBHOOK_SECRET', '')
 
@@ -518,6 +519,71 @@ async def fetch_finnhub_earnings(from_date: str, to_date: str) -> list:
         logger.warning(f"Finnhub earnings error: {e}")
     return []
 
+async def fetch_fmp_economic_calendar(from_date: str, to_date: str) -> list:
+    """Fetch real economic calendar from Financial Modeling Prep.
+    Returns events with actual/forecast/previous values. Filters to US, medium+ impact."""
+    if not FMP_KEY:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=12) as client:
+            resp = await client.get(
+                'https://financialmodelingprep.com/api/v3/economic_calendar',
+                params={'from': from_date, 'to': to_date, 'apikey': FMP_KEY}
+            )
+            if resp.status_code != 200:
+                logger.warning(f"FMP economic calendar HTTP {resp.status_code}: {resp.text[:200]}")
+                return []
+            raw = resp.json()
+            if not isinstance(raw, list):
+                logger.warning(f"FMP economic calendar unexpected response: {str(raw)[:200]}")
+                return []
+            events = []
+            for e in raw:
+                country = (e.get('country') or '').upper()
+                impact = (e.get('impact') or '').lower()
+                # Only US events, medium or high impact
+                if country not in ('US', 'USA', 'UNITED STATES'):
+                    continue
+                if impact not in ('medium', 'high'):
+                    continue
+                # Date comes as "2026-04-18 12:30:00"
+                raw_date = e.get('date', '')
+                event_date = raw_date[:10] if raw_date else ''
+                # Categorize for UI color coding
+                name = (e.get('event') or '').lower()
+                if 'fomc' in name or 'fed ' in name or 'federal funds' in name or 'powell' in name or 'interest rate' in name:
+                    category = 'fed'
+                elif 'cpi' in name or 'ppi' in name or 'pce' in name or 'inflation' in name:
+                    category = 'inflation'
+                elif 'payroll' in name or 'unemploy' in name or 'jobless' in name or 'jobs' in name or 'employment' in name:
+                    category = 'employment'
+                elif 'gdp' in name:
+                    category = 'gdp'
+                elif 'retail' in name or 'consumer' in name:
+                    category = 'consumer'
+                else:
+                    category = 'economic'
+                events.append({
+                    'event': e.get('event', '') or 'Economic Event',
+                    'date': event_date,
+                    'time_utc': raw_date,
+                    'impact': impact,
+                    'category': category,
+                    'estimate': str(e.get('estimate')) if e.get('estimate') is not None else '',
+                    'previous': str(e.get('previous')) if e.get('previous') is not None else '',
+                    'actual': str(e.get('actual')) if e.get('actual') is not None else '',
+                    'unit': e.get('unit', '') or '',
+                    'change': e.get('change'),
+                    'change_percent': e.get('changePercentage'),
+                    'description': f"{e.get('event', '')} — {country}"
+                })
+            events.sort(key=lambda x: (x.get('date', ''), x.get('time_utc', '')))
+            logger.info(f"FMP economic calendar: {len(events)} US events fetched for {from_date} → {to_date}")
+            return events
+    except Exception as e:
+        logger.warning(f"FMP economic calendar error: {e}")
+        return []
+
 def get_economic_events_for_week(today: datetime) -> list:
     """Return known economic events for the current week"""
     from calendar import monthrange
@@ -632,15 +698,26 @@ async def get_preflight(user=Depends(get_optional_user)):
     """Daily preflight briefing: economic calendar, earnings, breaking news"""
     now = datetime.now(timezone.utc)
     today_str = now.strftime('%Y-%m-%d')
-    
-    # 1. Economic events this week
-    economic_events = get_economic_events_for_week(now)
-    
+    weekday = now.weekday()  # 0=Mon
+    week_start = (now - timedelta(days=weekday)).strftime('%Y-%m-%d')
+    week_end = (now + timedelta(days=(6 - weekday))).strftime('%Y-%m-%d')
+
+    # 1. Economic events this week — prefer live FMP data, fall back to hardcoded stubs
+    economic_events = []
+    data_source = 'none'
+    if FMP_KEY:
+        economic_events = await fetch_fmp_economic_calendar(week_start, week_end)
+        data_source = 'fmp' if economic_events else 'fmp_empty'
+    if not economic_events:
+        economic_events = get_economic_events_for_week(now)
+        if data_source == 'none':
+            data_source = 'stub'
+
     # 2. Check DB for any admin-added economic events
     db_events = await db.economic_events.find(
         {'date': {'$gte': today_str}}, {'_id': 0}
     ).sort('date', 1).to_list(20)
-    
+
     # Merge DB events with generated ones
     all_events = economic_events + db_events
     all_events.sort(key=lambda x: x.get('date', ''))
@@ -692,6 +769,7 @@ async def get_preflight(user=Depends(get_optional_user)):
     return {
         'date': today_str,
         'economic_events': all_events,
+        'economic_source': data_source,
         'earnings': earnings_list,
         'breaking_news': breaking,
     }
