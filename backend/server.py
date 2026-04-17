@@ -28,7 +28,7 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 db_name = os.environ.get('DB_NAME', 'ndx_command')
 FINNHUB_KEY = os.environ.get('FINNHUB_API_KEY', '')
-JWT_SECRET = os.environ.get('JWT_SECRET', 'ndx-command-jwt-secret-2026-secure')
+JWT_SECRET = os.environ.get('JWT_SECRET', 'alerts-command-jwt-secret-2026-secure')
 WEBHOOK_SECRET = os.environ.get('WEBHOOK_SECRET', '')
 
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
