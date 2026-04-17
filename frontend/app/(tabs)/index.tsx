@@ -272,23 +272,23 @@ export default function DashboardScreen() {
           </View>
           <View style={styles.ndxStats}>
             <View style={styles.ndxStat}>
-              <Text style={styles.ndxStatLabel}>Open</Text>
-              <Text style={styles.ndxStatValue}>${formatPrice(ndx.open)}</Text>
+              <Text style={styles.ndxStatLabel} numberOfLines={1}>Open</Text>
+              <Text style={styles.ndxStatValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>${formatPrice(ndx.open)}</Text>
             </View>
             <View style={styles.ndxStatDivider} />
             <View style={styles.ndxStat}>
-              <Text style={styles.ndxStatLabel}>High</Text>
-              <Text style={[styles.ndxStatValue, { color: colors.green }]}>${formatPrice(ndx.high)}</Text>
+              <Text style={styles.ndxStatLabel} numberOfLines={1}>High</Text>
+              <Text style={[styles.ndxStatValue, { color: colors.green }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>${formatPrice(ndx.high)}</Text>
             </View>
             <View style={styles.ndxStatDivider} />
             <View style={styles.ndxStat}>
-              <Text style={styles.ndxStatLabel}>Low</Text>
-              <Text style={[styles.ndxStatValue, { color: colors.red }]}>${formatPrice(ndx.low)}</Text>
+              <Text style={styles.ndxStatLabel} numberOfLines={1}>Low</Text>
+              <Text style={[styles.ndxStatValue, { color: colors.red }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>${formatPrice(ndx.low)}</Text>
             </View>
             <View style={styles.ndxStatDivider} />
             <View style={styles.ndxStat}>
-              <Text style={styles.ndxStatLabel}>Prev</Text>
-              <Text style={styles.ndxStatValue}>${formatPrice(ndx.previousClose)}</Text>
+              <Text style={styles.ndxStatLabel} numberOfLines={1}>Prev</Text>
+              <Text style={styles.ndxStatValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>${formatPrice(ndx.previousClose)}</Text>
             </View>
           </View>
         </TouchableOpacity>
@@ -326,9 +326,9 @@ export default function DashboardScreen() {
         }
         ListFooterComponent={
           <View style={styles.footerDisclaimer}>
-            <Ionicons name="information-circle-outline" size={12} color={colors.textMuted} />
+            <Ionicons name="information-circle-outline" size={12} color={colors.textMuted} style={{ marginTop: 1 }} />
             <Text style={styles.footerDisclaimerText}>
-              For informational purposes only. Not financial advice. Market data may be delayed.
+              Not affiliated with Nasdaq, Inc. or any stock exchange. For informational purposes only — not financial advice. Market data may be delayed.
             </Text>
           </View>
         }

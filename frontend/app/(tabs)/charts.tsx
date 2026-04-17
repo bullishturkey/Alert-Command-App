@@ -194,9 +194,9 @@ export default function ChartsScreen() {
             </View>
           </View>
           <View style={s.priceRight}>
-            <View style={s.statMini}><Text style={s.statMiniL}>High</Text><Text style={s.statMiniV}>{formatPrice(quote.high)}</Text></View>
-            <View style={s.statMini}><Text style={s.statMiniL}>Low</Text><Text style={s.statMiniV}>{formatPrice(quote.low)}</Text></View>
-            <View style={s.statMini}><Text style={s.statMiniL}>Vol</Text><Text style={s.statMiniV}>{formatNumber(quote.volume)}</Text></View>
+            <View style={s.statMini}><Text style={s.statMiniL} numberOfLines={1}>High</Text><Text style={s.statMiniV} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{formatPrice(quote.high)}</Text></View>
+            <View style={s.statMini}><Text style={s.statMiniL} numberOfLines={1}>Low</Text><Text style={s.statMiniV} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{formatPrice(quote.low)}</Text></View>
+            <View style={s.statMini}><Text style={s.statMiniL} numberOfLines={1}>Vol</Text><Text style={s.statMiniV} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{formatNumber(quote.volume)}</Text></View>
           </View>
         </View>
       )}
@@ -241,6 +241,12 @@ export default function ChartsScreen() {
           </TouchableOpacity>
         ))}
       </View>
+
+      {/* Disclaimer */}
+      <View style={s.disclaimer}>
+        <Ionicons name="information-circle-outline" size={11} color={colors.textMuted} />
+        <Text style={s.disclaimerTxt}>Not affiliated with Nasdaq, Inc. or any stock exchange. Informational only — not financial advice.</Text>
+      </View>
     </SafeAreaView>
   );
 }
@@ -257,10 +263,10 @@ const s = StyleSheet.create({
   priceVal: { fontSize: 26, fontWeight: '800' },
   chgRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 1 },
   chgTxt: { fontSize: 12, fontWeight: '600' },
-  priceRight: { alignItems: 'flex-end', gap: 1 },
-  statMini: { flexDirection: 'row', gap: 8 },
-  statMiniL: { color: colors.textMuted, fontSize: 11, width: 30, textAlign: 'right' },
-  statMiniV: { color: '#ccc', fontSize: 11, fontWeight: '600', minWidth: 70, textAlign: 'right' },
+  priceRight: { alignItems: 'flex-end', gap: 2, flexShrink: 0 },
+  statMini: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  statMiniL: { color: colors.textMuted, fontSize: 11, minWidth: 36, textAlign: 'right' },
+  statMiniV: { color: '#ccc', fontSize: 11, fontWeight: '600', minWidth: 80, textAlign: 'right' },
   // Stats grid
   statsGrid: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 4, gap: 20 },
   sg: { flexDirection: 'row', gap: 8 },
@@ -280,6 +286,9 @@ const s = StyleSheet.create({
   tfOn: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.green },
   tfTxt: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
   tfTxtOn: { color: colors.green },
+  // Disclaimer
+  disclaimer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16, paddingBottom: 4, paddingTop: 2, gap: 4, opacity: 0.55 },
+  disclaimerTxt: { color: colors.textMuted, fontSize: 9, fontWeight: '500', textAlign: 'center', flexShrink: 1 },
   // Picker
   pickOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
   pickCard: { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: SH * 0.5, borderWidth: 1, borderColor: colors.border },
