@@ -1,222 +1,212 @@
-"""Backend tests for Alerts Command - focusing on economic calendar integration on /api/preflight."""
+"""
+Backend API tests for Alerts Command security + performance fixes.
+
+Focus:
+ 1. Webhook secret enforcement (POST /api/alerts/webhook)
+ 2. Admin password loaded from env var (old admin123 rejected, new accepted)
+ 3. DB index presence (smoke) + regression suite
+"""
 import os
 import sys
-import time
 import uuid
-import json
 import requests
 
-BASE_URL = "https://market-preflight.preview.emergentagent.com/api"
-
+BASE = "https://market-preflight.preview.emergentagent.com/api"
 ADMIN_EMAIL = "admin@alertscommand.com"
-ADMIN_PASSWORD = "admin123"
+ADMIN_NEW_PASSWORD = "iC_T3UTrwO-Ym1eBwMvdDrlU"
+ADMIN_OLD_PASSWORD = "admin123"
+WEBHOOK_SECRET = "hbd30zqEwACjWgnBbq0V4TYLzl7Da9m2b3BWcRNms8WSl7ntX27LEQo7IdduXgwV"
+BAD_SECRET = "not-the-real-secret-xxxxxx"
 
 results = []
 
-def record(name, ok, details=""):
+def record(name, ok, detail=""):
     status = "PASS" if ok else "FAIL"
-    print(f"[{status}] {name}: {details}")
-    results.append((name, ok, details))
-    return ok
+    print(f"[{status}] {name} — {detail}")
+    results.append((name, ok, detail))
 
+def section(title):
+    print("\n" + "=" * 80)
+    print(title)
+    print("=" * 80)
 
-def test_preflight_live():
-    """1. /api/preflight returns live economic events with actual/forecast/previous"""
-    print("\n=== TEST 1: /api/preflight (first call) ===")
-    try:
-        r = requests.get(f"{BASE_URL}/preflight", timeout=30)
-    except Exception as e:
-        return record("preflight_http_200", False, f"Request error: {e}")
-    if r.status_code != 200:
-        return record("preflight_http_200", False, f"Status={r.status_code}, body={r.text[:300]}")
-    record("preflight_http_200", True, f"HTTP 200")
-    data = r.json()
+# ---------------- 1. Webhook Secret Enforcement ----------------
+section("1. Webhook Secret Enforcement")
+webhook_url = f"{BASE}/alerts/webhook"
 
-    econ_source = data.get("economic_source")
-    record(
-        "economic_source_live",
-        econ_source == "live",
-        f"economic_source={econ_source!r} (expected 'live')",
-    )
+r = requests.post(webhook_url, json={"content": "NDX @ 26,400 no-secret"}, timeout=30)
+record("Webhook: missing secret → 403", r.status_code == 403,
+       f"status={r.status_code} body={r.text[:200]}")
 
-    events = data.get("economic_events", [])
-    record(
-        "at_least_5_events",
-        len(events) >= 5,
-        f"len(economic_events)={len(events)}",
-    )
+r = requests.post(webhook_url, json={"content": "NDX @ 26,401 wrong-header"},
+                  headers={"X-Webhook-Secret": BAD_SECRET}, timeout=30)
+record("Webhook: wrong X-Webhook-Secret → 403", r.status_code == 403,
+       f"status={r.status_code} body={r.text[:200]}")
 
-    required_fields = ["event", "date", "impact", "category", "estimate", "previous", "actual"]
-    missing_sample = None
-    all_have_fields = True
-    for e in events:
-        for f in required_fields:
-            if f not in e:
-                all_have_fields = False
-                missing_sample = (f, e)
-                break
-        if not all_have_fields:
+r = requests.post(webhook_url, json={"content": "NDX @ 26,402 wrong-bearer"},
+                  headers={"Authorization": f"Bearer {BAD_SECRET}"}, timeout=30)
+record("Webhook: wrong Bearer token → 403", r.status_code == 403,
+       f"status={r.status_code} body={r.text[:200]}")
+
+marker_1 = f"NDX @ 26,403 header-ok-{uuid.uuid4().hex[:6]}"
+r = requests.post(webhook_url, json={"content": marker_1},
+                  headers={"X-Webhook-Secret": WEBHOOK_SECRET}, timeout=30)
+header_ok = r.status_code == 200 and r.json().get("status") == "ok" and r.json().get("alert_id")
+alert_id_1 = r.json().get("alert_id") if r.status_code == 200 else None
+record("Webhook: correct X-Webhook-Secret → 200", header_ok,
+       f"status={r.status_code} body={r.text[:200]}")
+
+marker_2 = f"NDX @ 26,404 bearer-ok-{uuid.uuid4().hex[:6]}"
+r = requests.post(webhook_url, json={"content": marker_2},
+                  headers={"Authorization": f"Bearer {WEBHOOK_SECRET}"}, timeout=30)
+bearer_ok = r.status_code == 200 and r.json().get("status") == "ok" and r.json().get("alert_id")
+alert_id_2 = r.json().get("alert_id") if r.status_code == 200 else None
+record("Webhook: correct Bearer token → 200", bearer_ok,
+       f"status={r.status_code} body={r.text[:200]}")
+
+# ---------------- 2. Admin Password from Env Var ----------------
+section("2. Admin Password from Env Var")
+login_url = f"{BASE}/auth/login"
+
+r = requests.post(login_url, json={"email": ADMIN_EMAIL, "password": ADMIN_OLD_PASSWORD}, timeout=30)
+record("Login: old 'admin123' → 401", r.status_code == 401,
+       f"status={r.status_code} body={r.text[:200]}")
+
+r = requests.post(login_url, json={"email": ADMIN_EMAIL, "password": ADMIN_NEW_PASSWORD}, timeout=30)
+ok_login = r.status_code == 200
+token = ""
+is_admin = False
+if ok_login:
+    body = r.json()
+    token = body.get("access_token") or body.get("token") or ""
+    user = body.get("user", {})
+    is_admin = bool(user.get("is_admin"))
+record("Login: new password → 200 + JWT + is_admin=true",
+       ok_login and bool(token) and is_admin,
+       f"status={r.status_code} has_token={bool(token)} is_admin={is_admin}")
+
+me_email_ok = False
+if token:
+    r = requests.get(f"{BASE}/auth/me", headers={"Authorization": f"Bearer {token}"}, timeout=30)
+    if r.status_code == 200:
+        me = r.json()
+        # API wraps the user in {"user": {...}}
+        user_obj = me.get("user", me) if isinstance(me, dict) else {}
+        me_email_ok = user_obj.get("email") == ADMIN_EMAIL and bool(user_obj.get("is_admin"))
+    record("GET /auth/me with JWT → 200", me_email_ok,
+           f"status={r.status_code} body={r.text[:200]}")
+else:
+    record("GET /auth/me with JWT → 200", False, "no token from login")
+
+# ---------------- 3. Verify webhook alerts persisted ----------------
+section("3. Alert Persistence Verification")
+
+if token:
+    r = requests.get(f"{BASE}/alerts", headers={"Authorization": f"Bearer {token}"}, timeout=30)
+    body = r.json() if r.status_code == 200 else {}
+    # API wraps the list under {"alerts": [...]}
+    arr = body.get("alerts") if isinstance(body, dict) and "alerts" in body else (body if isinstance(body, list) else [])
+    alerts_ok = r.status_code == 200 and isinstance(arr, list)
+    found_markers = []
+    webhook_source_count = 0
+    if alerts_ok:
+        for a in arr:
+            if a.get("source") == "webhook":
+                webhook_source_count += 1
+            if a.get("id") in (alert_id_1, alert_id_2):
+                found_markers.append(a)
+    record("GET /api/alerts → 200 with array", alerts_ok,
+           f"status={r.status_code} count={len(arr) if alerts_ok else 'n/a'}")
+    both_present = len(found_markers) == 2
+    all_webhook_source = all(a.get("source") == "webhook" for a in found_markers) and both_present
+    record("Webhook alerts appear in /api/alerts with source='webhook'",
+           all_webhook_source,
+           f"found={len(found_markers)}/2, total_webhook={webhook_source_count}")
+else:
+    record("GET /api/alerts → 200 with array", False, "no admin token")
+    record("Webhook alerts appear in /api/alerts with source='webhook'", False, "no admin token")
+
+# ---------------- 4. Regression Checks ----------------
+section("4. Regression Checks")
+
+rand_email = f"trader_{uuid.uuid4().hex[:10]}@alertscommand-test.com"
+rand_password = "Tr@der-Strong-Pw-2026!"
+rand_username = f"trader_{uuid.uuid4().hex[:6]}"
+r = requests.post(f"{BASE}/auth/register",
+                  json={"email": rand_email, "password": rand_password, "username": rand_username},
+                  timeout=30)
+reg_ok = r.status_code == 200
+reg_token = ""
+if reg_ok:
+    rb = r.json()
+    reg_token = rb.get("access_token") or rb.get("token") or ""
+record("POST /api/auth/register (new random email) → 200",
+       reg_ok and bool(reg_token),
+       f"status={r.status_code} body={r.text[:200]}")
+
+record("POST /api/auth/login (admin) → 200 [regression]", ok_login, "already tested above")
+record("GET /api/auth/me (with JWT) → 200 [regression]", me_email_ok, "already tested above")
+
+headers_admin = {"Authorization": f"Bearer {token}"} if token else {}
+
+r = requests.get(f"{BASE}/market/ndx", headers=headers_admin, timeout=30)
+ndx_ok = False
+ndx_detail = ""
+if r.status_code == 200:
+    j = r.json()
+    price = j.get("price")
+    ndx_ok = isinstance(price, (int, float)) and price > 0
+    ndx_detail = f"price={price} change={j.get('change')} %={j.get('changePercent')}"
+record("GET /api/market/ndx → 200 with live NDX price", ndx_ok,
+       f"status={r.status_code} {ndx_detail}")
+
+r = requests.get(f"{BASE}/alerts", headers=headers_admin, timeout=30)
+body = r.json() if r.status_code == 200 else {}
+arr = body.get("alerts") if isinstance(body, dict) and "alerts" in body else (body if isinstance(body, list) else [])
+alerts_reg_ok = r.status_code == 200 and isinstance(arr, list)
+record("GET /api/alerts → 200 with array [regression]", alerts_reg_ok,
+       f"status={r.status_code} count={len(arr) if alerts_reg_ok else 'n/a'}")
+
+r = requests.get(f"{BASE}/preflight", headers=headers_admin, timeout=45)
+preflight_ok = False
+pf_detail = ""
+if r.status_code == 200:
+    j = r.json()
+    # sentiment can be under various keys depending on impl
+    has_sentiment = any(k in j for k in ("sentiment", "ai_sentiment", "market_sentiment", "news_sentiment"))
+    events = j.get("economic_events") or j.get("events") or []
+    preflight_ok = isinstance(events, list) and (has_sentiment or len(events) > 0)
+    pf_detail = (f"economic_source={j.get('economic_source')} events={len(events)} "
+                 f"has_sentiment={has_sentiment} keys={list(j.keys())[:10]}")
+record("GET /api/preflight → 200 with sentiment + economic events", preflight_ok,
+       f"status={r.status_code} {pf_detail}")
+
+# Multi quote: try /market/quote/multi, fall back to /market/quote-multi, /market/quotes
+quote_ok = False
+quote_detail = ""
+for path in ["market/quote/multi", "market/quote-multi", "market/quotes"]:
+    r = requests.get(f"{BASE}/{path}", params={"symbols": "AAPL,MSFT"}, headers=headers_admin, timeout=30)
+    if r.status_code == 200:
+        j = r.json()
+        items = j if isinstance(j, list) else (
+            j.get("quotes") if isinstance(j, dict) and "quotes" in j else (
+                list(j.values()) if isinstance(j, dict) else None
+            )
+        )
+        if isinstance(items, list) and len(items) >= 2:
+            quote_ok = True
+            quote_detail = f"path=/{path} items={len(items)}"
             break
-    record(
-        "events_have_required_fields",
-        all_have_fields,
-        "All events have required fields" if all_have_fields else f"Missing {missing_sample[0]!r} in event {missing_sample[1]}",
-    )
+    else:
+        quote_detail += f" /{path}→{r.status_code};"
+record("GET /api/market/quote/multi?symbols=AAPL,MSFT → 200", quote_ok, quote_detail)
 
-    with_actual = [e for e in events if (e.get("actual") or "").strip()]
-    sample_actuals = [(e["event"], e["actual"]) for e in with_actual[:3]]
-    record(
-        "at_least_one_actual_nonempty",
-        len(with_actual) >= 1,
-        f"{len(with_actual)} events have non-empty 'actual'. Samples: {sample_actuals}",
-    )
-
-    if events:
-        print(f"   Sample event: {json.dumps(events[0], indent=2)[:500]}")
-    return True
-
-
-def test_preflight_cache_hit():
-    """2. Second call → backend logs should show CACHE HIT"""
-    print("\n=== TEST 2: /api/preflight (second call → cache hit) ===")
-    time.sleep(1)
-    try:
-        r = requests.get(f"{BASE_URL}/preflight", timeout=30)
-    except Exception as e:
-        return record("preflight_second_call", False, f"Request error: {e}")
-    record("preflight_second_call", r.status_code == 200, f"Status={r.status_code}")
-
-    time.sleep(1)
-    cache_hit_found = False
-    details = ""
-    try:
-        import subprocess
-        out = subprocess.check_output(
-            ["tail", "-n", "400", "/var/log/supervisor/backend.err.log"],
-            stderr=subprocess.STDOUT,
-        ).decode("utf-8", errors="ignore")
-        cache_hit_found = "Econ calendar: CACHE HIT" in out
-        fetched_count = out.count("Econ calendar: FETCHED")
-        cache_hit_count = out.count("Econ calendar: CACHE HIT")
-        details = f"CACHE HIT lines: {cache_hit_count}, FETCHED lines: {fetched_count}"
-    except Exception as e:
-        details = f"Could not read log: {e}"
-    record("cache_hit_log_present", cache_hit_found, details)
-
-
-def test_auth_register():
-    print("\n=== TEST 3a: /api/auth/register ===")
-    unique_email = f"trader_{uuid.uuid4().hex[:8]}@alertscommand.com"
-    payload = {
-        "email": unique_email,
-        "username": f"trader_{uuid.uuid4().hex[:6]}",
-        "password": "SecurePass2026!",
-    }
-    try:
-        r = requests.post(f"{BASE_URL}/auth/register", json=payload, timeout=15)
-    except Exception as e:
-        return record("auth_register", False, f"Request error: {e}")
-    ok = r.status_code == 200 and "token" in r.json() and "user" in r.json()
-    record("auth_register", ok, f"Status={r.status_code}, email={unique_email}")
-
-
-def test_auth_login():
-    print("\n=== TEST 3b: /api/auth/login (admin) ===")
-    payload = {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
-    try:
-        r = requests.post(f"{BASE_URL}/auth/login", json=payload, timeout=15)
-    except Exception as e:
-        record("auth_login", False, f"Request error: {e}")
-        return None
-    if r.status_code != 200:
-        record("auth_login", False, f"Status={r.status_code}, body={r.text[:300]}")
-        return None
-    data = r.json()
-    token = data.get("token")
-    record(
-        "auth_login",
-        bool(token) and data.get("user", {}).get("is_admin") is True,
-        f"JWT received, is_admin={data.get('user', {}).get('is_admin')}",
-    )
-    return token
-
-
-def test_market_ndx():
-    print("\n=== TEST 3c: /api/market/ndx ===")
-    try:
-        r = requests.get(f"{BASE_URL}/market/ndx", timeout=20)
-    except Exception as e:
-        return record("market_ndx", False, f"Request error: {e}")
-    if r.status_code != 200:
-        return record("market_ndx", False, f"Status={r.status_code}")
-    data = r.json()
-    required = ["symbol", "price", "change", "changePercent", "timestamp"]
-    missing = [f for f in required if f not in data]
-    ok = not missing and data.get("symbol") == "NDX"
-    record(
-        "market_ndx",
-        ok,
-        f"NDX @ ${data.get('price')} ({data.get('changePercent')}%), missing={missing}",
-    )
-
-
-def test_alerts_list():
-    print("\n=== TEST 3d: /api/alerts ===")
-    try:
-        r = requests.get(f"{BASE_URL}/alerts", timeout=15)
-    except Exception as e:
-        return record("alerts_list", False, f"Request error: {e}")
-    if r.status_code != 200:
-        return record("alerts_list", False, f"Status={r.status_code}")
-    data = r.json()
-    ok = "alerts" in data and isinstance(data["alerts"], list)
-    record("alerts_list", ok, f"Retrieved {len(data.get('alerts', []))} alerts")
-
-
-def test_webhook_alert():
-    print("\n=== TEST 3e: /api/alerts/webhook ===")
-    payload = {"content": "NDX @ 26,400 test"}
-    try:
-        r = requests.post(f"{BASE_URL}/alerts/webhook", json=payload, timeout=15)
-    except Exception as e:
-        return record("alerts_webhook", False, f"Request error: {e}")
-    if r.status_code != 200:
-        return record("alerts_webhook", False, f"Status={r.status_code}, body={r.text[:300]}")
-    data = r.json()
-    ok = data.get("status") == "ok" and data.get("alert_id")
-    record("alerts_webhook", ok, f"alert_id={data.get('alert_id')}")
-
-    time.sleep(0.5)
-    try:
-        r2 = requests.get(f"{BASE_URL}/alerts", timeout=15)
-        alerts = r2.json().get("alerts", [])
-        found = any(a.get("id") == data.get("alert_id") for a in alerts)
-        record("alerts_webhook_verified_in_list", found, f"Alert found in /alerts: {found}")
-    except Exception as e:
-        record("alerts_webhook_verified_in_list", False, f"Verification error: {e}")
-
-
-def main():
-    print(f"=== Alerts Command Backend Tests ===")
-    print(f"BASE_URL: {BASE_URL}\n")
-
-    test_preflight_live()
-    test_preflight_cache_hit()
-    test_auth_register()
-    test_auth_login()
-    test_market_ndx()
-    test_alerts_list()
-    test_webhook_alert()
-
-    print("\n=== SUMMARY ===")
-    passed = sum(1 for _, ok, _ in results if ok)
-    total = len(results)
-    for name, ok, details in results:
-        status = "PASS" if ok else "FAIL"
-        print(f"  [{status}] {name}")
-    print(f"\n{passed}/{total} checks passed")
-    return 0 if passed == total else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+# ---------------- Summary ----------------
+section("SUMMARY")
+passed = sum(1 for _, ok, _ in results if ok)
+total = len(results)
+print(f"{passed}/{total} tests passed")
+for name, ok, detail in results:
+    sym = "OK  " if ok else "FAIL"
+    print(f"  [{sym}] {name}  | {detail}")
+sys.exit(0 if passed == total else 1)

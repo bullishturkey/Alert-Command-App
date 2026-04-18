@@ -856,16 +856,39 @@ async def delete_alert(alert_id: str, user=Depends(get_admin_user)):
     return {'status': 'deleted'}
 
 @api_router.post("/alerts/webhook")
-async def webhook_alert(body: dict = Body(...)):
+async def webhook_alert(
+    body: dict = Body(...),
+    x_webhook_secret: Optional[str] = Header(None, alias="X-Webhook-Secret"),
+    authorization: Optional[str] = Header(None),
+):
     """
     Webhook endpoint for incoming trade signals.
-    
+
     Expected payload:
     {"content": "24,580.50"}  or  {"content": "NDX at 24,580 - support bounce"}
-    
+
     Also accepts:
     {"text": "..."}  or  {"price": "24580"}  or  {"title": "...", "message": "..."}
+
+    Authentication:
+    - If WEBHOOK_SECRET env var is set, requests must include it via either:
+        * X-Webhook-Secret: <secret>
+        * Authorization: Bearer <secret>
+    - If WEBHOOK_SECRET is not set, endpoint allows all (with a warning log).
     """
+    # === Auth check ===
+    if WEBHOOK_SECRET:
+        provided = x_webhook_secret or ''
+        if not provided and authorization:
+            # Support "Authorization: Bearer <secret>" as a fallback
+            if authorization.lower().startswith('bearer '):
+                provided = authorization.split(' ', 1)[1].strip()
+        if provided != WEBHOOK_SECRET:
+            logger.warning("Webhook rejected: invalid or missing secret")
+            raise HTTPException(status_code=403, detail="Forbidden: invalid webhook secret")
+    else:
+        logger.warning("Webhook accepted without auth (WEBHOOK_SECRET not configured)")
+
     # Extract the alert content - try multiple fields
     content = body.get('content', '') or body.get('text', '') or body.get('message', '') or body.get('alert', '')
     price = body.get('price', '')
@@ -1614,18 +1637,50 @@ async def api_support_page():
 # === STARTUP ===
 @app.on_event("startup")
 async def startup():
-    # Seed admin
-    admin = await db.users.find_one({'email': 'admin@alertscommand.com'})
-    if not admin:
-        await db.users.insert_one({
-            'id': str(uuid.uuid4()),
-            'email': 'admin@alertscommand.com',
-            'username': 'Admin',
-            'password_hash': hash_password('admin123'),
-            'is_admin': True,
-            'created_at': datetime.now(timezone.utc).isoformat()
-        })
-        logger.info("Admin user seeded")
+    # === Create DB indexes (idempotent — fast if already exist) ===
+    try:
+        await db.users.create_index("email", unique=True)
+        await db.alerts.create_index([("created_at", -1)])
+        await db.alerts.create_index("source")
+        await db.alerts.create_index("ticker")
+        await db.channels.create_index("slug", unique=True)
+        await db.watchlist.create_index("user_id")
+        await db.push_tokens.create_index("token", unique=True)
+        await db.messages.create_index([("channel_id", 1), ("created_at", -1)])
+        logger.info("DB indexes ensured")
+    except Exception as e:
+        logger.error(f"Index creation issue: {e}")
+
+    # === Seed admin (only if ADMIN_PASSWORD env var is set) ===
+    admin_password = os.environ.get('ADMIN_PASSWORD', '')
+    admin_email = os.environ.get('ADMIN_EMAIL', 'admin@alertscommand.com')
+    if not admin_password:
+        logger.warning(
+            "ADMIN_PASSWORD not set — skipping admin seed. "
+            "Set ADMIN_PASSWORD in your environment / deployment secrets to enable."
+        )
+    else:
+        admin = await db.users.find_one({'email': admin_email})
+        if not admin:
+            await db.users.insert_one({
+                'id': str(uuid.uuid4()),
+                'email': admin_email,
+                'username': 'Admin',
+                'password_hash': hash_password(admin_password),
+                'is_admin': True,
+                'created_at': datetime.now(timezone.utc).isoformat()
+            })
+            logger.info(f"Admin user seeded: {admin_email}")
+        else:
+            # Rotate password if it changed (so updating the env var propagates)
+            await db.users.update_one(
+                {'email': admin_email},
+                {'$set': {
+                    'password_hash': hash_password(admin_password),
+                    'is_admin': True,
+                }}
+            )
+            logger.info(f"Admin password synced from env for {admin_email}")
 
     # Seed channels
     channel_defs = [

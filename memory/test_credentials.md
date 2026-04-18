@@ -1,9 +1,13 @@
-# Test Credentials
+# Test Credentials — Alerts Command
 
 ## Admin Account
-- Email: admin@alertscommand.com
-- Password: admin123
+- **Email**: `admin@alertscommand.com`
+- **Password**: `iC_T3UTrwO-Ym1eBwMvdDrlU`
 
-## Legacy Admin (may still exist in DB)
-- Email: admin@ndxcommand.com
-- Password: admin123
+Password is now loaded from `ADMIN_PASSWORD` env var in `/app/backend/.env`.
+If `ADMIN_PASSWORD` is unset, admin seeding is skipped entirely.
+
+## Webhook Secret (for TradingView / Pipedream)
+- **Header**: `X-Webhook-Secret: hbd30zqEwACjWgnBbq0V4TYLzl7Da9m2b3BWcRNms8WSl7ntX27LEQo7IdduXgwV`
+- Also accepted: `Authorization: Bearer hbd30zqEwACjWgnBbq0V4TYLzl7Da9m2b3BWcRNms8WSl7ntX27LEQo7IdduXgwV`
+- Stored in backend `.env` as `WEBHOOK_SECRET`.

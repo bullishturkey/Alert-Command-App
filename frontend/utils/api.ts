@@ -1,9 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { TOKEN_KEY } from '../constants/auth';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 export async function apiFetch(endpoint: string, options: RequestInit = {}) {
-  const token = await AsyncStorage.getItem('ndx_auth_token');
+  const token = await AsyncStorage.getItem(TOKEN_KEY);
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...((options.headers as Record<string, string>) || {}),

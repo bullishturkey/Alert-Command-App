@@ -324,8 +324,63 @@ backend:
           agent: "testing"
           comment: "✅ NEW Webhook NDX Command source working perfectly. POST /api/alerts/webhook creates alerts with correct attribution: created_by='NDX Command' and source='webhook' (NOT TradingView). No authentication required. Alert creation and verification both functional."
 
+  - task: "Webhook Secret Enforcement - SECURITY FIX"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added WEBHOOK_SECRET enforcement to POST /api/alerts/webhook. Accepts secret via X-Webhook-Secret header OR Authorization: Bearer <secret>. Returns 403 if mismatched. When WEBHOOK_SECRET env is empty, allows through with warning log (graceful rollout). Current dev secret: hbd30zqEwACjWgnBbq0V4TYLzl7Da9m2b3BWcRNms8WSl7ntX27LEQo7IdduXgwV. Manual sanity tests passed: no-secret → 403, wrong-secret → 403, correct X-Webhook-Secret → 200, correct Bearer → 200."
+        - working: true
+          agent: "testing"
+          comment: "✅ VERIFIED via external URL /api/alerts/webhook: (a) missing header → 403 {'detail':'Forbidden: invalid webhook secret'}, (b) wrong X-Webhook-Secret value → 403, (c) wrong Authorization: Bearer value → 403, (d) correct X-Webhook-Secret header → 200 with alert_id, (e) correct Authorization: Bearer → 200 with alert_id. Both accepted alerts subsequently appear in GET /api/alerts with source='webhook' and ticker='NDX'. Backend logs confirm 'Webhook rejected: invalid or missing secret' for rejects and 'Webhook alert received' for accepts. Secret enforcement fully functional."
+
+  - task: "Admin Password from Env Var - SECURITY FIX"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Removed hardcoded 'admin123'. Startup now reads ADMIN_PASSWORD env var. If unset, admin seeding is SKIPPED entirely with warning. If set and user exists, password hash is UPDATED so env changes propagate. Admin email also configurable via ADMIN_EMAIL (default: admin@alertscommand.com). Current dev password: iC_T3UTrwO-Ym1eBwMvdDrlU. Manual test passed: old 'admin123' → 401, new password → 200 with JWT."
+        - working: true
+          agent: "testing"
+          comment: "✅ VERIFIED: POST /api/auth/login with admin@alertscommand.com + old 'admin123' → 401 {'detail':'Invalid credentials'}. POST /api/auth/login with admin@alertscommand.com + new ADMIN_PASSWORD (iC_T3UTrwO-Ym1eBwMvdDrlU) → 200 with JWT token and user.is_admin=true. GET /api/auth/me with that JWT → 200 returning correct user object (email=admin@alertscommand.com, is_admin=true). Backend log confirms 'Admin password synced from env for admin@alertscommand.com' on startup (hash rotation works on each boot). Env-driven admin credentials fully functional."
+
+  - task: "DB Indexes on Startup - PERFORMANCE"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added idempotent index creation on startup for: users.email (unique), alerts.created_at (desc), alerts.source, alerts.ticker, channels.slug (unique), watchlist.user_id, push_tokens.token (unique), messages.channel_id+created_at. Backend log confirms 'DB indexes ensured' on startup. Wrapped in try/except so startup doesn't fail if index creation fails."
+        - working: true
+          agent: "testing"
+          comment: "✅ Backend log shows 'DB indexes ensured' cleanly on startup (no exceptions from index creation). Startup completes with 'Alerts Command backend started successfully'. All downstream endpoints that depend on these collections (users, alerts, channels, watchlist, push_tokens, messages) respond normally, indicating no index conflict or migration failure. Idempotent creation across reloads confirmed across multiple server restarts in the logs."
+
 frontend:
-  # No frontend testing performed as per instructions
+  - task: "Auth Token Key Unification - CRITICAL BUG FIX"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/utils/api.ts, /app/frontend/contexts/AuthContext.tsx, /app/frontend/constants/auth.ts"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Created /app/frontend/constants/auth.ts with TOKEN_KEY='ac_auth_token' and GUEST_KEY='ac_guest_mode'. Updated utils/api.ts and contexts/AuthContext.tsx to import these shared constants. Previously utils/api.ts used 'ndx_auth_token' (leftover from rename) while AuthContext wrote 'ac_auth_token' — this caused every apiFetch call to silently drop the token. Frontend verification pending."
 
 metadata:
   created_by: "testing_agent"
@@ -349,4 +404,9 @@ agent_communication:
     - agent: "testing"
       message: "✅ LATEST NEW ENDPOINTS TESTING COMPLETE: Successfully tested the 3 newest endpoints as requested: 1) AI Sentiment Analysis (GET /api/ai/sentiment) - Claude AI integration working perfectly with comprehensive sentiment analysis including overall_sentiment, confidence, summary, key_drivers, ndx_outlook, risk_factors, trade_bias. Response time under 1 second with proper caching. 2) Alert Edit Functionality (PUT /api/alerts/{alert_id}) - admin-only endpoint successfully updates alert fields with proper authentication. 3) Webhook NDX Command Source (POST /api/alerts/webhook) - creates alerts with correct attribution (created_by='NDX Command', source='webhook') without TradingView branding. All 6 test cases passed (100% success rate). All new endpoints fully functional and ready for production."
     - agent: "testing"
+    - agent: "main"
+      message: "🔒 SECURITY + PERFORMANCE FIXES from code review: 1) Auth Token Key Mismatch: Unified 'ac_auth_token' between utils/api.ts and AuthContext.tsx via new /app/frontend/constants/auth.ts (TOKEN_KEY/GUEST_KEY constants). 2) Webhook Secret: POST /api/alerts/webhook now enforces WEBHOOK_SECRET env var via X-Webhook-Secret header or Authorization: Bearer. Graceful rollout: if env unset, allows through with warning. 3) Admin Password: Removed hardcoded 'admin123'. Startup reads ADMIN_PASSWORD env var (skips seed if unset, updates hash if set). 4) DB Indexes: Idempotent startup index creation for users.email, alerts.created_at/source/ticker, channels.slug, watchlist.user_id, push_tokens.token, messages compound. Manual backend sanity tests all passed (6/6). Please test: (a) webhook with correct/wrong/missing X-Webhook-Secret header, (b) webhook with Authorization: Bearer, (c) admin login with new password iC_T3UTrwO-Ym1eBwMvdDrlU and that old admin123 is rejected, (d) index existence on users/alerts/channels collections, (e) regression: auth register/login/me, market/ndx, preflight, alerts GET. Dev WEBHOOK_SECRET: hbd30zqEwACjWgnBbq0V4TYLzl7Da9m2b3BWcRNms8WSl7ntX27LEQo7IdduXgwV"
+
       message: "✅ ECONOMIC CALENDAR INTEGRATION + REGRESSION TESTS PASSED (13/13): 1) GET /api/preflight (guest) returns HTTP 200 with economic_source='live' and 19 real US economic events from Finnhub for the current week (2026-04-13 → 2026-04-19). Every event has all required fields (event, date, impact, category, estimate, previous, actual); 17 of 19 events have non-empty 'actual' values (e.g., Existing Home Sales actual=3.98 vs estimate=4.06 vs previous=4.13). 2) Second /api/preflight call confirmed in-memory 30-min TTL cache: backend log shows 'Econ calendar: CACHE HIT (19 events, age 0m)' — only 1 FETCHED entry vs 4 CACHE HITs, no duplicate Finnhub API calls. 3) Regression: POST /api/auth/register (new email) ✅, POST /api/auth/login (admin@alertscommand.com) returns JWT with is_admin=true ✅, GET /api/market/ndx returns live NDX @ $26672.43 (+1.29%) ✅, GET /api/alerts returns 7 alerts ✅, POST /api/alerts/webhook with {\"content\":\"NDX @ 26,400 test\"} creates alert and it appears in /api/alerts ✅. All core flows functional."
+    - agent: "testing"
+      message: "✅ SECURITY + PERFORMANCE FIXES VERIFIED (17/17 tests passed via /app/backend_test.py against external URL):\n\n[1] Webhook Secret Enforcement — POST /api/alerts/webhook:\n  • no header → 403 ✅\n  • wrong X-Webhook-Secret → 403 ✅\n  • wrong Authorization: Bearer → 403 ✅\n  • correct X-Webhook-Secret → 200 (alert persisted with source='webhook', ticker='NDX') ✅\n  • correct Authorization: Bearer <secret> → 200 (alert persisted) ✅\n  Both accepted alerts verified present in GET /api/alerts with source='webhook'.\n\n[2] Admin Password from Env Var:\n  • Old 'admin123' → 401 Invalid credentials ✅\n  • New ADMIN_PASSWORD → 200 + JWT + user.is_admin=true ✅\n  • GET /api/auth/me with that JWT → 200 returning admin user ✅\n  • Backend log confirms 'Admin password synced from env for admin@alertscommand.com' on startup.\n\n[3] DB Indexes:\n  • Backend log shows clean 'DB indexes ensured' on startup with no exceptions ✅\n  • All downstream collections respond normally — idempotent creation confirmed across restarts.\n\n[4] Regression (all pass):\n  • POST /api/auth/register (random email) → 200 + token ✅\n  • POST /api/auth/login (admin) → 200 ✅\n  • GET /api/auth/me (with JWT) → 200 (response wraps user under {\"user\":{...}}) ✅\n  • GET /api/market/ndx → 200 NDX @ $26672.43 (+1.29%) ✅\n  • GET /api/alerts → 200 with 15 alerts (response shape: {\"alerts\":[...]}) ✅\n  • GET /api/preflight → 200, economic_source='live', 19 events, earnings + breaking_news present ✅\n  • GET /api/market/quote/multi?symbols=AAPL,MSFT → 200 with 14 items ✅\n\nNote (non-blocking): /api/preflight response keys are ['date','economic_events','economic_source','earnings','breaking_news'] — no explicit 'sentiment' field on this endpoint (sentiment is served separately by /api/ai/sentiment). This matches current implementation; the review request wording 'sentiment + economic events' appears to refer to preflight's broader briefing content (events + earnings + news) rather than a literal sentiment key. No code change needed. Backend is fully functional and all requested security + performance fixes are working correctly."

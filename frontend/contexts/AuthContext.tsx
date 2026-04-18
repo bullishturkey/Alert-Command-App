@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { TOKEN_KEY, GUEST_KEY } from '../constants/auth';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -37,8 +38,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadToken = async () => {
     try {
-      const saved = await AsyncStorage.getItem('ac_auth_token');
-      const guestMode = await AsyncStorage.getItem('ac_guest_mode');
+      const saved = await AsyncStorage.getItem(TOKEN_KEY);
+      const guestMode = await AsyncStorage.getItem(GUEST_KEY);
       if (saved) {
         const resp = await fetch(`${API_URL}/api/auth/me`, {
           headers: { Authorization: `Bearer ${saved}` },
@@ -48,7 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(data.user);
           setToken(saved);
         } else {
-          await AsyncStorage.removeItem('ac_auth_token');
+          await AsyncStorage.removeItem(TOKEN_KEY);
           if (guestMode === 'true') setIsGuest(true);
         }
       } else if (guestMode === 'true') {
@@ -72,8 +73,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error(err.detail || 'Login failed');
     }
     const data = await resp.json();
-    await AsyncStorage.setItem('ac_auth_token', data.token);
-    await AsyncStorage.removeItem('ac_guest_mode');
+    await AsyncStorage.setItem(TOKEN_KEY, data.token);
+    await AsyncStorage.removeItem(GUEST_KEY);
     setToken(data.token);
     setUser(data.user);
     setIsGuest(false);
@@ -90,23 +91,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error(err.detail || 'Registration failed');
     }
     const data = await resp.json();
-    await AsyncStorage.setItem('ac_auth_token', data.token);
-    await AsyncStorage.removeItem('ac_guest_mode');
+    await AsyncStorage.setItem(TOKEN_KEY, data.token);
+    await AsyncStorage.removeItem(GUEST_KEY);
     setToken(data.token);
     setUser(data.user);
     setIsGuest(false);
   }, []);
 
   const logout = useCallback(async () => {
-    await AsyncStorage.removeItem('ac_auth_token');
-    await AsyncStorage.removeItem('ac_guest_mode');
+    await AsyncStorage.removeItem(TOKEN_KEY);
+    await AsyncStorage.removeItem(GUEST_KEY);
     setToken(null);
     setUser(null);
     setIsGuest(false);
   }, []);
 
   const continueAsGuest = useCallback(() => {
-    AsyncStorage.setItem('ac_guest_mode', 'true');
+    AsyncStorage.setItem(GUEST_KEY, 'true');
     setIsGuest(true);
   }, []);
 
@@ -120,8 +121,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const err = await resp.json().catch(() => ({ detail: 'Failed to delete account' }));
       throw new Error(err.detail || 'Failed to delete account');
     }
-    await AsyncStorage.removeItem('ac_auth_token');
-    await AsyncStorage.removeItem('ac_guest_mode');
+    await AsyncStorage.removeItem(TOKEN_KEY);
+    await AsyncStorage.removeItem(GUEST_KEY);
     setToken(null);
     setUser(null);
     setIsGuest(false);
