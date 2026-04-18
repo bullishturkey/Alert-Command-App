@@ -1232,6 +1232,244 @@ _ai_sentiment_refreshing: bool = False
 AI_SENTIMENT_CACHE_TTL = 900           # 15 min — fresh
 AI_SENTIMENT_HARD_TTL = 3600           # 60 min — beyond this, force fresh fetch
 
+# Weekly recap cache (keyed by ISO week, e.g. "2026-W16")
+_weekly_recap_cache: Dict[str, Dict[str, Any]] = {}
+_weekly_recap_lock = asyncio.Lock()
+
+
+def _is_market_closed_now() -> bool:
+    """True on weekends (Sat/Sun US Eastern). Intra-week holidays not handled here —
+    they just fall through to live mode, which is fine for MVP."""
+    # US Eastern time defines market hours
+    try:
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo
+        et_now = _dt.now(ZoneInfo("America/New_York"))
+        # weekday(): Mon=0 ... Sun=6
+        return et_now.weekday() >= 5  # Sat=5, Sun=6
+    except Exception:
+        # Fallback: naive UTC weekday check (close enough)
+        return datetime.now(timezone.utc).weekday() >= 5
+
+
+def _current_iso_week_key() -> str:
+    """Returns an ISO week identifier like '2026-W16'. Used as weekly recap cache key."""
+    try:
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo
+        et_now = _dt.now(ZoneInfo("America/New_York"))
+    except Exception:
+        et_now = datetime.now(timezone.utc)
+    iso_year, iso_week, _ = et_now.isocalendar()
+    return f"{iso_year}-W{iso_week:02d}"
+
+
+def _fetch_weekly_movers_yf() -> Dict[str, Any]:
+    """Fetch weekly % change for major indexes and tracked stocks.
+    Runs in thread pool (yfinance is sync)."""
+    import yfinance as _yf
+
+    # Major market indexes
+    index_specs = [
+        ('^NDX', 'Nasdaq 100'),
+        ('^GSPC', 'S&P 500'),
+        ('^DJI', 'Dow Jones'),
+        ('^RUT', 'Russell 2000'),
+        ('^VIX', 'VIX (Volatility)'),
+    ]
+    # Tracked NDX-100 stocks (excluding indexes/ETFs)
+    stock_symbols = ['NVDA', 'MSFT', 'AAPL', 'AMZN', 'META', 'TSLA', 'AMD', 'AVGO', 'GOOGL', 'QQQ']
+
+    def _pct_change(symbol: str) -> Optional[Dict[str, Any]]:
+        try:
+            t = _yf.Ticker(symbol)
+            hist = t.history(period='7d', interval='1d')
+            if hist.empty or len(hist) < 2:
+                return None
+            open_price = float(hist['Open'].iloc[0])
+            close_price = float(hist['Close'].iloc[-1])
+            if open_price <= 0:
+                return None
+            pct = round(((close_price - open_price) / open_price) * 100, 2)
+            return {
+                'symbol': symbol.lstrip('^'),
+                'price': round(close_price, 2),
+                'change_pct': pct,
+                'open_week': round(open_price, 2),
+            }
+        except Exception as e:
+            logger.warning(f"Weekly movers yfinance error for {symbol}: {e}")
+            return None
+
+    indexes = []
+    for sym, name in index_specs:
+        row = _pct_change(sym)
+        if row:
+            row['name'] = name
+            indexes.append(row)
+
+    stock_rows = []
+    for sym in stock_symbols:
+        row = _pct_change(sym)
+        if row:
+            row['name'] = TRACKED_SYMBOLS.get(sym, {}).get('name', sym)
+            stock_rows.append(row)
+
+    # Sort once, slice for gainers/losers
+    stock_rows.sort(key=lambda r: r['change_pct'], reverse=True)
+    top_gainers = stock_rows[:5]
+    top_losers = list(reversed(stock_rows[-5:])) if len(stock_rows) >= 5 else []
+
+    return {
+        'indexes': indexes,
+        'top_gainers': top_gainers,
+        'top_losers': top_losers,
+    }
+
+
+async def _fetch_weekly_movers() -> Dict[str, Any]:
+    """Async wrapper for weekly movers fetch (runs yfinance in thread pool)."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, _fetch_weekly_movers_yf)
+
+
+def _week_label(week_key: str) -> str:
+    """Given '2026-W16', return a human-readable 'Apr 13–19, 2026' label."""
+    try:
+        year, week = week_key.split('-W')
+        year_i, week_i = int(year), int(week)
+        monday = datetime.strptime(f'{year_i}-W{week_i:02d}-1', '%G-W%V-%u')
+        sunday = monday + timedelta(days=6)
+        if monday.month == sunday.month:
+            return f"{monday.strftime('%b')} {monday.day}–{sunday.day}, {monday.year}"
+        return f"{monday.strftime('%b %d')} – {sunday.strftime('%b %d')}, {sunday.year}"
+    except Exception:
+        return week_key
+
+
+async def _generate_weekly_recap() -> Dict[str, Any]:
+    """Generate the weekend 'Week in Review' payload.
+    Parallelizes movers + news fetches; Claude summarizes both.
+    Cached per ISO-week so it regenerates at most once per week."""
+    if not EMERGENT_LLM_KEY:
+        return {'error': 'AI service not configured', 'sentiment': None, 'mode': 'weekly_recap'}
+
+    movers, finnhub_news = await asyncio.gather(
+        _fetch_weekly_movers(),
+        fetch_finnhub_news(),
+        return_exceptions=False,
+    )
+
+    # Filter news to last 7 days, take top 10 with summary
+    week_news_items = []
+    now_ts = time.time()
+    seven_days_ago = now_ts - (7 * 86400)
+    if finnhub_news:
+        for item in finnhub_news:
+            dt = item.get('datetime', 0) or 0
+            if dt >= seven_days_ago:
+                week_news_items.append(item)
+            if len(week_news_items) >= 15:
+                break
+    if not week_news_items and finnhub_news:
+        week_news_items = finnhub_news[:10]
+
+    key_news = []
+    for item in week_news_items[:10]:
+        headline = item.get('headline', '')
+        summary = item.get('summary', '')
+        key_news.append({
+            'headline': headline,
+            'source': item.get('source', 'Unknown'),
+            'summary': summary[:250],
+            'sentiment': simple_sentiment(headline + ' ' + summary),
+            'url': item.get('url', ''),
+            'timestamp': datetime.fromtimestamp(item.get('datetime', 0), tz=timezone.utc).isoformat() if item.get('datetime') else datetime.now(timezone.utc).isoformat()
+        })
+
+    # Build Claude prompt
+    news_text = "\n".join(f"- [{n['source']}] {n['headline']}. {n['summary'][:150]}" for n in key_news[:8])
+    indexes_text = "\n".join(f"- {i['name']} ({i['symbol']}): {i['change_pct']:+.2f}% (close ${i['price']})" for i in movers.get('indexes', []))
+    gainers_text = "\n".join(f"- {g['symbol']} ({g['name']}): {g['change_pct']:+.2f}%" for g in movers.get('top_gainers', [])[:3])
+    losers_text = "\n".join(f"- {l['symbol']} ({l['name']}): {l['change_pct']:+.2f}%" for l in movers.get('top_losers', [])[:3])
+
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"ndx-weekly-{_current_iso_week_key()}",
+        system_message="""You are a senior market analyst writing a weekend 'Week in Review' brief for a Nasdaq-100 (NDX) trading community.
+Markets are closed; produce a concise, static recap of what happened this past week.
+
+Respond ONLY with valid JSON in this exact format:
+{
+  "overall_sentiment": "bullish" | "bearish" | "neutral",
+  "confidence": 1-10,
+  "summary": "3-4 sentence recap of how markets moved this week",
+  "key_drivers": ["driver 1", "driver 2", "driver 3"],
+  "ndx_outlook": "1-2 sentence take on what to watch when markets reopen Monday",
+  "risk_factors": ["risk 1", "risk 2"],
+  "trade_bias": "Brief actionable stance heading into next week"
+}
+
+Be direct, professional, trading-focused. No disclaimers."""
+    )
+    chat.with_model("anthropic", "claude-4-sonnet-20250514")
+    chat.with_params(timeout=15, num_retries=0)
+
+    user_msg = UserMessage(text=f"""Weekly market recap — produce JSON analysis.
+
+INDEX PERFORMANCE (week):
+{indexes_text or '(data unavailable)'}
+
+TOP GAINERS (NDX-100 tracked, this week):
+{gainers_text or '(none)'}
+
+TOP LOSERS (NDX-100 tracked, this week):
+{losers_text or '(none)'}
+
+KEY NEWS THIS WEEK:
+{news_text or '(no news available)'}
+
+Provide your JSON analysis.""")
+
+    # Sentiment via Claude (with its own 15s litellm timeout)
+    sentiment_data: Dict[str, Any] = {
+        'overall_sentiment': 'neutral',
+        'confidence': 0,
+        'summary': 'Week in review summary unavailable.',
+        'key_drivers': [],
+        'ndx_outlook': '',
+        'risk_factors': [],
+        'trade_bias': ''
+    }
+    try:
+        response = await chat.send_message(user_msg)
+        resp_text = response.strip()
+        if resp_text.startswith('```'):
+            resp_text = resp_text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
+        sentiment_data = json.loads(resp_text)
+    except Exception as e:
+        logger.warning(f"Weekly recap Claude call failed: {e} — returning movers-only recap")
+
+    week_key = _current_iso_week_key()
+    return {
+        'mode': 'weekly_recap',
+        'sentiment': sentiment_data,
+        'weekly_recap': {
+            'week_key': week_key,
+            'week_label': _week_label(week_key),
+            'indexes': movers.get('indexes', []),
+            'top_gainers': movers.get('top_gainers', []),
+            'top_losers': movers.get('top_losers', []),
+            'key_news': key_news,
+        },
+        'generated_at': datetime.now(timezone.utc).isoformat(),
+        'ndx_price': next((i['price'] for i in movers.get('indexes', []) if i['symbol'] == 'NDX'), None),
+        'ndx_change': next((i['change_pct'] for i in movers.get('indexes', []) if i['symbol'] == 'NDX'), None),
+        'news_count': len(key_news),
+    }
+
 
 async def _generate_ai_sentiment() -> Dict[str, Any]:
     """Fetch data + call Claude. Used by the endpoint and the background refresher."""
@@ -1350,29 +1588,75 @@ async def _refresh_ai_sentiment_bg():
 
 @api_router.get("/ai/sentiment")
 async def get_ai_sentiment(user=Depends(get_optional_user)):
-    """AI-powered market sentiment analysis using Claude.
+    """AI-powered market sentiment.
 
-    Strategy:
-      - Fresh (<15 min old): return cached immediately.
-      - Stale (15–60 min old): return cached + kick off a background refresh.
-      - Expired (>60 min or no cache): generate fresh synchronously (with 20s timeout).
+    - Weekends (Sat/Sun ET): returns a static 'Week in Review' cached per ISO week.
+      Includes top gainers/losers, index performance, key news, and Claude summary.
+    - Weekdays: returns live market sentiment with stale-while-revalidate caching
+      (fresh <15 min, stale up to 60 min with background refresh).
     """
     global _ai_sentiment_cache, _ai_sentiment_cache_time
     import time as _time
-    now = _time.time()
-    age = now - _ai_sentiment_cache_time
 
     if not EMERGENT_LLM_KEY:
         return {'error': 'AI service not configured', 'sentiment': None}
 
+    # === Weekend: weekly recap mode ===
+    if _is_market_closed_now():
+        week_key = _current_iso_week_key()
+        cached = _weekly_recap_cache.get(week_key)
+        if cached:
+            return cached
+        async with _weekly_recap_lock:
+            # Re-check after lock (another request may have populated it)
+            cached = _weekly_recap_cache.get(week_key)
+            if cached:
+                return cached
+            try:
+                result = await _generate_weekly_recap()
+                # Only cache if we got real data (at least movers succeeded)
+                if result.get('weekly_recap', {}).get('indexes') or result.get('weekly_recap', {}).get('top_gainers'):
+                    _weekly_recap_cache[week_key] = result
+                    logger.info(f"Weekly recap generated and cached for {week_key}")
+                return result
+            except Exception as e:
+                logger.error(f"Weekly recap generation failed: {e}")
+                # Fallback: return a minimal weekly_recap response
+                return {
+                    'mode': 'weekly_recap',
+                    'error': str(e),
+                    'sentiment': {
+                        'overall_sentiment': 'neutral',
+                        'confidence': 0,
+                        'summary': 'Weekly recap temporarily unavailable. Please try again shortly.',
+                        'key_drivers': [],
+                        'ndx_outlook': '',
+                        'risk_factors': [],
+                        'trade_bias': ''
+                    },
+                    'weekly_recap': {
+                        'week_key': week_key,
+                        'week_label': _week_label(week_key),
+                        'indexes': [],
+                        'top_gainers': [],
+                        'top_losers': [],
+                        'key_news': [],
+                    },
+                    'generated_at': datetime.now(timezone.utc).isoformat(),
+                }
+
+    # === Weekday: live sentiment (existing stale-while-revalidate) ===
+    now = _time.time()
+    age = now - _ai_sentiment_cache_time
+
     # Fresh cache hit
     if _ai_sentiment_cache and age < AI_SENTIMENT_CACHE_TTL:
-        return _ai_sentiment_cache
+        return {**_ai_sentiment_cache, 'mode': 'live'}
 
     # Stale but usable — serve cache, refresh in background
     if _ai_sentiment_cache and age < AI_SENTIMENT_HARD_TTL:
         asyncio.create_task(_refresh_ai_sentiment_bg())
-        return _ai_sentiment_cache
+        return {**_ai_sentiment_cache, 'mode': 'live'}
 
     # Expired or no cache — generate fresh with a lock so only one caller pays the cost
     try:
@@ -1380,19 +1664,20 @@ async def get_ai_sentiment(user=Depends(get_optional_user)):
             # Re-check after acquiring lock (another request may have just filled it)
             now = _time.time()
             if _ai_sentiment_cache and (now - _ai_sentiment_cache_time) < AI_SENTIMENT_CACHE_TTL:
-                return _ai_sentiment_cache
+                return {**_ai_sentiment_cache, 'mode': 'live'}
 
             result = await _generate_ai_sentiment()
             if result.get('sentiment'):
                 _ai_sentiment_cache = result
                 _ai_sentiment_cache_time = _time.time()
                 logger.info(f"AI sentiment generated: {result['sentiment'].get('overall_sentiment', 'unknown')}")
-            return result
+            return {**result, 'mode': 'live'}
     except asyncio.TimeoutError:
         logger.warning("AI sentiment: Claude call timed out after 20s")
         if _ai_sentiment_cache:
-            return _ai_sentiment_cache
+            return {**_ai_sentiment_cache, 'mode': 'live'}
         return {
+            'mode': 'live',
             'error': 'AI analysis timed out',
             'sentiment': {
                 'overall_sentiment': 'neutral',
@@ -1408,8 +1693,9 @@ async def get_ai_sentiment(user=Depends(get_optional_user)):
     except Exception as e:
         logger.error(f"AI sentiment error: {e}")
         if _ai_sentiment_cache:
-            return _ai_sentiment_cache
+            return {**_ai_sentiment_cache, 'mode': 'live'}
         return {
+            'mode': 'live',
             'error': str(e),
             'sentiment': {
                 'overall_sentiment': 'neutral',

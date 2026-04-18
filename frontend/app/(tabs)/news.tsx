@@ -20,6 +20,15 @@ interface AISentiment {
   risk_factors: string[];
   trade_bias: string;
 }
+interface MoverRow { symbol: string; name: string; change_pct: number; price: number; }
+interface WeeklyRecap {
+  week_key: string;
+  week_label: string;
+  indexes: MoverRow[];
+  top_gainers: MoverRow[];
+  top_losers: MoverRow[];
+  key_news: NewsItem[];
+}
 
 const IMPACT = { high: { color: colors.red, bg: colors.redBg, label: 'HIGH' }, medium: { color: colors.yellow, bg: colors.yellowBg, label: 'MED' }, low: { color: colors.textSecondary, bg: 'rgba(161,161,170,0.08)', label: 'LOW' } } as Record<string, any>;
 const CAT_ICON: Record<string, string> = { fed: 'business', inflation: 'trending-up', employment: 'people', economic: 'bar-chart' };
@@ -50,6 +59,8 @@ export default function PreflightScreen() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const [aiExpanded, setAiExpanded] = useState(true);
+  const [aiMode, setAiMode] = useState<'live' | 'weekly_recap'>('live');
+  const [weeklyRecap, setWeeklyRecap] = useState<WeeklyRecap | null>(null);
   const [ndxPrice, setNdxPrice] = useState<number | null>(null);
   const [ndxChange, setNdxChange] = useState<number | null>(null);
 
@@ -68,6 +79,8 @@ export default function PreflightScreen() {
         if (data.ndx_price) setNdxPrice(data.ndx_price);
         if (data.ndx_change !== undefined) setNdxChange(data.ndx_change);
       }
+      setAiMode(data.mode === 'weekly_recap' ? 'weekly_recap' : 'live');
+      setWeeklyRecap(data.weekly_recap || null);
       if (data.error && !data.sentiment?.summary) {
         setAiError(data.error);
       }
@@ -103,15 +116,83 @@ export default function PreflightScreen() {
             {/* AI Sentiment Card */}
             <View style={st.section}>
               <TouchableOpacity style={st.secHead} onPress={() => setAiExpanded(!aiExpanded)} activeOpacity={0.7}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Ionicons name="sparkles" size={16} color={colors.green} />
-                  <Text style={st.secTitle}>AI Market Intelligence</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <Ionicons name={aiMode === 'weekly_recap' ? 'calendar' : 'sparkles'} size={16} color={aiMode === 'weekly_recap' ? colors.blue : colors.green} />
+                  <Text style={st.secTitle}>{aiMode === 'weekly_recap' ? 'Week in Review' : 'AI Market Intelligence'}</Text>
+                  {aiMode === 'weekly_recap' && weeklyRecap?.week_label ? (
+                    <View style={st.weekPill}><Text style={st.weekPillTxt}>{weeklyRecap.week_label}</Text></View>
+                  ) : null}
                 </View>
                 <Ionicons name={aiExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
               </TouchableOpacity>
 
+              {aiExpanded && aiMode === 'weekly_recap' && weeklyRecap && (weeklyRecap.indexes.length > 0 || weeklyRecap.top_gainers.length > 0) && (
+                <View style={st.recapCard}>
+                  <View style={st.recapClosedBadge}>
+                    <Ionicons name="moon" size={11} color={colors.blue} />
+                    <Text style={st.recapClosedTxt}>MARKETS CLOSED · WEEKEND RECAP</Text>
+                  </View>
+
+                  {/* Index performance grid */}
+                  {weeklyRecap.indexes.length > 0 && (
+                    <>
+                      <Text style={st.recapSectionLabel}>INDEX PERFORMANCE</Text>
+                      <View style={st.indexGrid}>
+                        {weeklyRecap.indexes.map((idx, i) => {
+                          const isUp = idx.change_pct >= 0;
+                          const idxColor = idx.symbol === 'VIX' ? (isUp ? colors.red : colors.green) : (isUp ? colors.green : colors.red);
+                          return (
+                            <View key={i} style={st.indexCell}>
+                              <Text style={st.indexSym}>{idx.symbol}</Text>
+                              <Text style={[st.indexChg, { color: idxColor }]}>{isUp ? '+' : ''}{idx.change_pct.toFixed(2)}%</Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </>
+                  )}
+
+                  {/* Gainers / Losers two-column */}
+                  {(weeklyRecap.top_gainers.length > 0 || weeklyRecap.top_losers.length > 0) && (
+                    <View style={st.moversWrap}>
+                      {weeklyRecap.top_gainers.length > 0 && (
+                        <View style={st.moversCol}>
+                          <View style={st.moversHeader}>
+                            <Ionicons name="trending-up" size={11} color={colors.green} />
+                            <Text style={[st.moversTitle, { color: colors.green }]}>TOP GAINERS</Text>
+                          </View>
+                          {weeklyRecap.top_gainers.map((g, i) => (
+                            <View key={i} style={st.moverRow}>
+                              <Text style={st.moverSym}>{g.symbol}</Text>
+                              <Text style={[st.moverPct, { color: colors.green }]}>+{g.change_pct.toFixed(2)}%</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                      {weeklyRecap.top_losers.length > 0 && (
+                        <View style={st.moversCol}>
+                          <View style={st.moversHeader}>
+                            <Ionicons name="trending-down" size={11} color={colors.red} />
+                            <Text style={[st.moversTitle, { color: colors.red }]}>BOTTOM 5</Text>
+                          </View>
+                          {weeklyRecap.top_losers.map((l, i) => {
+                            const isDown = l.change_pct < 0;
+                            return (
+                              <View key={i} style={st.moverRow}>
+                                <Text style={st.moverSym}>{l.symbol}</Text>
+                                <Text style={[st.moverPct, { color: isDown ? colors.red : colors.textSecondary }]}>{isDown ? '' : '+'}{l.change_pct.toFixed(2)}%</Text>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </View>
+              )}
+
               {aiExpanded && (
-                <View style={st.aiCard}>
+                <View style={[st.aiCard, aiMode === 'weekly_recap' ? { marginTop: 12 } : null]}>
                   {aiLoading ? (
                     <View style={st.aiLoadingWrap}>
                       <ActivityIndicator size="small" color={colors.green} />
@@ -319,6 +400,25 @@ const st = StyleSheet.create({
 
   // AI Sentiment Card
   aiCard: { marginHorizontal: 20, backgroundColor: colors.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: 'rgba(0,200,5,0.15)' },
+
+  // Weekly Recap Card (weekend mode)
+  weekPill: { backgroundColor: 'rgba(10,132,255,0.12)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(10,132,255,0.2)' },
+  weekPillTxt: { color: colors.blue, fontSize: 10, fontWeight: '700' },
+  recapCard: { marginHorizontal: 20, backgroundColor: colors.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: 'rgba(10,132,255,0.2)' },
+  recapClosedBadge: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 5, backgroundColor: 'rgba(10,132,255,0.1)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 100, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(10,132,255,0.15)' },
+  recapClosedTxt: { color: colors.blue, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
+  recapSectionLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 0.8, marginBottom: 8 },
+  indexGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 14 },
+  indexCell: { flexBasis: '31%', flexGrow: 1, backgroundColor: colors.bg, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 8, alignItems: 'center', borderWidth: 1, borderColor: colors.borderSubtle },
+  indexSym: { color: '#fff', fontSize: 11, fontWeight: '700', marginBottom: 4 },
+  indexChg: { fontSize: 13, fontWeight: '800' },
+  moversWrap: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  moversCol: { flex: 1, backgroundColor: colors.bg, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: colors.borderSubtle },
+  moversHeader: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8 },
+  moversTitle: { fontSize: 9, fontWeight: '800', letterSpacing: 0.6 },
+  moverRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
+  moverSym: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  moverPct: { fontSize: 12, fontWeight: '800' },
   aiLoadingWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 20, justifyContent: 'center' },
   aiLoadingTxt: { color: colors.textSecondary, fontSize: 13 },
   aiHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
