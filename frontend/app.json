@@ -9,7 +9,7 @@
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": false,
+      "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "Scan QR codes for quick stock lookups",
         "UIBackgroundModes": ["remote-notification"]

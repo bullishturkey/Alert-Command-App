@@ -340,14 +340,29 @@ async def fetch_finnhub_candles(symbol: str, resolution: str = 'D', count: int =
 async def fetch_finnhub_news(category: str = 'general') -> Optional[list]:
     if not FINNHUB_KEY:
         return None
+    # In-memory cache (5 min TTL) keyed by category
+    global _FINNHUB_NEWS_CACHE
+    now_ts = time.time()
+    cached = _FINNHUB_NEWS_CACHE.get(category)
+    if cached and (now_ts - cached['ts'] < _FINNHUB_NEWS_TTL):
+        return cached['data']
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get('https://finnhub.io/api/v1/news', params={'category': category, 'token': FINNHUB_KEY})
             if resp.status_code == 200:
-                return resp.json()
+                data = resp.json()
+                _FINNHUB_NEWS_CACHE[category] = {'ts': now_ts, 'data': data}
+                return data
     except Exception as e:
         logger.warning(f"Finnhub news error: {e}")
+    # Fallback: serve stale if available
+    if cached:
+        return cached['data']
     return None
+
+# In-memory cache for Finnhub general news (5 min TTL)
+_FINNHUB_NEWS_CACHE: Dict[str, Dict[str, Any]] = {}
+_FINNHUB_NEWS_TTL = 300
 
 def simple_sentiment(text: str) -> str:
     text_lower = text.lower()
@@ -507,6 +522,13 @@ async def get_news(user=Depends(get_optional_user)):
 async def fetch_finnhub_earnings(from_date: str, to_date: str) -> list:
     if not FINNHUB_KEY:
         return []
+    # Cache key is the date range; 30 min TTL
+    global _FINNHUB_EARN_CACHE
+    cache_key = f"{from_date}_{to_date}"
+    now_ts = time.time()
+    cached = _FINNHUB_EARN_CACHE.get(cache_key)
+    if cached and (now_ts - cached['ts'] < _FINNHUB_EARN_TTL):
+        return cached['data']
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get('https://finnhub.io/api/v1/calendar/earnings', params={
@@ -515,10 +537,19 @@ async def fetch_finnhub_earnings(from_date: str, to_date: str) -> list:
             if resp.status_code == 200:
                 data = resp.json()
                 tracked = {'NVDA','MSFT','AAPL','AMZN','META','TSLA','AMD','AVGO','GOOGL'}
-                return [e for e in data.get('earningsCalendar', []) if e.get('symbol') in tracked]
+                filtered = [e for e in data.get('earningsCalendar', []) if e.get('symbol') in tracked]
+                _FINNHUB_EARN_CACHE[cache_key] = {'ts': now_ts, 'data': filtered}
+                return filtered
     except Exception as e:
         logger.warning(f"Finnhub earnings error: {e}")
+    # Serve stale on failure
+    if cached:
+        return cached['data']
     return []
+
+# In-memory cache for Finnhub earnings (30 min TTL)
+_FINNHUB_EARN_CACHE: Dict[str, Dict[str, Any]] = {}
+_FINNHUB_EARN_TTL = 1800
 
 # In-memory cache for economic calendar (TTL: 30 min)
 # Key: "YYYY-MM-DD_YYYY-MM-DD"  → { 'ts': epoch_seconds, 'data': [events] }
@@ -724,38 +755,44 @@ def get_economic_events_for_week(today: datetime) -> list:
 
 @api_router.get("/preflight")
 async def get_preflight(user=Depends(get_optional_user)):
-    """Daily preflight briefing: economic calendar, earnings, breaking news"""
+    """Daily preflight briefing: economic calendar, earnings, breaking news.
+    All external fetches run in parallel for speed."""
     now = datetime.now(timezone.utc)
     today_str = now.strftime('%Y-%m-%d')
     weekday = now.weekday()  # 0=Mon
     week_start = (now - timedelta(days=weekday)).strftime('%Y-%m-%d')
     week_end = (now + timedelta(days=(6 - weekday))).strftime('%Y-%m-%d')
+    end_date = (now + timedelta(days=30)).strftime('%Y-%m-%d')
 
-    # 1. Economic events this week — prefer live Finnhub data, fall back to hardcoded stubs
-    economic_events = []
+    # === Run all 3 Finnhub fetches + DB query in PARALLEL ===
+    econ_task = fetch_finnhub_economic_calendar(week_start, week_end) if FINNHUB_KEY else asyncio.sleep(0, result=[])
+    earn_task = fetch_finnhub_earnings(today_str, end_date)
+    news_task = fetch_finnhub_news()
+    db_task = db.economic_events.find(
+        {'date': {'$gte': today_str}}, {'_id': 0}
+    ).sort('date', 1).to_list(20)
+
+    economic_events, earnings, finnhub_news, db_events = await asyncio.gather(
+        econ_task, earn_task, news_task, db_task,
+        return_exceptions=False,
+    )
+
+    # Economic events: decide source
     data_source = 'none'
     if FINNHUB_KEY:
-        economic_events = await fetch_finnhub_economic_calendar(week_start, week_end)
         data_source = 'live' if economic_events else 'live_empty'
     if not economic_events:
         economic_events = get_economic_events_for_week(now)
         if data_source == 'none':
             data_source = 'stub'
 
-    # 2. Check DB for any admin-added economic events
-    db_events = await db.economic_events.find(
-        {'date': {'$gte': today_str}}, {'_id': 0}
-    ).sort('date', 1).to_list(20)
-
     # Merge DB events with generated ones
-    all_events = economic_events + db_events
+    all_events = economic_events + (db_events or [])
     all_events.sort(key=lambda x: x.get('date', ''))
-    
-    # 3. Earnings calendar from Finnhub (next 30 days)
-    end_date = (now + timedelta(days=30)).strftime('%Y-%m-%d')
-    earnings = await fetch_finnhub_earnings(today_str, end_date)
+
+    # Earnings list
     earnings_list = []
-    for e in earnings:
+    for e in (earnings or []):
         earnings_list.append({
             'symbol': e.get('symbol', ''),
             'date': e.get('date', ''),
@@ -765,9 +802,8 @@ async def get_preflight(user=Depends(get_optional_user)):
             'epsActual': e.get('epsActual'),
             'revenueActual': e.get('revenueActual'),
         })
-    
-    # 4. Breaking news (most recent Finnhub news)
-    finnhub_news = await fetch_finnhub_news()
+
+    # Breaking news (most recent Finnhub news)
     breaking = []
     if finnhub_news:
         for item in finnhub_news[:10]:
@@ -794,7 +830,7 @@ async def get_preflight(user=Depends(get_optional_user)):
                 'url': '',
                 'timestamp': ts.isoformat()
             })
-    
+
     return {
         'date': today_str,
         'economic_events': all_events,
@@ -1191,50 +1227,47 @@ async def update_alert(alert_id: str, body: dict = Body(...), user=Depends(get_a
 # =====================
 _ai_sentiment_cache: Dict[str, Any] = {}
 _ai_sentiment_cache_time: float = 0
-AI_SENTIMENT_CACHE_TTL = 300  # 5 minutes
+_ai_sentiment_refresh_lock = asyncio.Lock()
+_ai_sentiment_refreshing: bool = False
+AI_SENTIMENT_CACHE_TTL = 900           # 15 min — fresh
+AI_SENTIMENT_HARD_TTL = 3600           # 60 min — beyond this, force fresh fetch
 
-@api_router.get("/ai/sentiment")
-async def get_ai_sentiment(user=Depends(get_optional_user)):
-    """AI-powered market sentiment analysis using Claude"""
-    global _ai_sentiment_cache, _ai_sentiment_cache_time
-    import time as _time
-    now = _time.time()
-    
-    # Return cached result if fresh
-    if now - _ai_sentiment_cache_time < AI_SENTIMENT_CACHE_TTL and _ai_sentiment_cache:
-        return _ai_sentiment_cache
-    
+
+async def _generate_ai_sentiment() -> Dict[str, Any]:
+    """Fetch data + call Claude. Used by the endpoint and the background refresher."""
     if not EMERGENT_LLM_KEY:
         return {'error': 'AI service not configured', 'sentiment': None}
-    
-    try:
-        # Gather context: NDX quote + breaking news
-        ndx_quote = await fetch_ndx_quote()
-        finnhub_news = await fetch_finnhub_news()
-        
-        # Build news summary for Claude
-        news_text = ""
-        if finnhub_news:
-            for item in finnhub_news[:8]:
-                headline = item.get('headline', '')
-                source = item.get('source', 'Unknown')
-                summary = item.get('summary', '')[:150]
-                news_text += f"- [{source}] {headline}. {summary}\n"
-        else:
-            for item in MOCK_NEWS[:8]:
-                news_text += f"- [{item['source']}] {item['headline']}. {item['summary'][:150]}\n"
-        
-        ndx_info = ""
-        if ndx_quote:
-            ndx_info = f"NDX (Nasdaq 100) is currently at ${ndx_quote.get('price', 'N/A')}, change: {ndx_quote.get('change', 0)} ({ndx_quote.get('changePercent', 0)}%). Open: ${ndx_quote.get('open', 'N/A')}, High: ${ndx_quote.get('high', 'N/A')}, Low: ${ndx_quote.get('low', 'N/A')}."
-        
-        # Call Claude via emergentintegrations
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"ndx-sentiment-{datetime.now(timezone.utc).strftime('%Y%m%d%H')}",
-            system_message="""You are a senior market analyst for a Nasdaq-100 (NDX) trading community. 
+
+    # Gather context in parallel: NDX quote + news
+    ndx_quote, finnhub_news = await asyncio.gather(
+        fetch_ndx_quote(),
+        fetch_finnhub_news(),
+        return_exceptions=False,
+    )
+
+    # Build news summary for Claude
+    news_text = ""
+    if finnhub_news:
+        for item in finnhub_news[:8]:
+            headline = item.get('headline', '')
+            source = item.get('source', 'Unknown')
+            summary = item.get('summary', '')[:150]
+            news_text += f"- [{source}] {headline}. {summary}\n"
+    else:
+        for item in MOCK_NEWS[:8]:
+            news_text += f"- [{item['source']}] {item['headline']}. {item['summary'][:150]}\n"
+
+    ndx_info = ""
+    if ndx_quote:
+        ndx_info = f"NDX (Nasdaq 100) is currently at ${ndx_quote.get('price', 'N/A')}, change: {ndx_quote.get('change', 0)} ({ndx_quote.get('changePercent', 0)}%). Open: ${ndx_quote.get('open', 'N/A')}, High: ${ndx_quote.get('high', 'N/A')}, Low: ${ndx_quote.get('low', 'N/A')}."
+
+    # Call Claude via emergentintegrations with a hard timeout
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"ndx-sentiment-{datetime.now(timezone.utc).strftime('%Y%m%d%H')}",
+        system_message="""You are a senior market analyst for a Nasdaq-100 (NDX) trading community. 
 Your job is to analyze breaking financial news and market data to produce a concise, actionable market intelligence brief.
 
 IMPORTANT: Respond ONLY with valid JSON in this exact format:
@@ -1249,11 +1282,14 @@ IMPORTANT: Respond ONLY with valid JSON in this exact format:
 }
 
 Be direct, professional, and trading-focused. No disclaimers or caveats."""
-        )
-        chat.with_model("anthropic", "claude-4-sonnet-20250514")
-        
-        user_message = UserMessage(
-            text=f"""Analyze the following market data and news for the NDX trading community:
+    )
+    chat.with_model("anthropic", "claude-4-sonnet-20250514")
+    # Tight timeout + no retries at litellm level (the underlying sync call blocks the
+    # event loop, so our outer asyncio.wait_for won't cancel it — must be enforced here).
+    chat.with_params(timeout=15, num_retries=0)
+
+    user_message = UserMessage(
+        text=f"""Analyze the following market data and news for the NDX trading community:
 
 MARKET DATA:
 {ndx_info}
@@ -1262,46 +1298,117 @@ BREAKING NEWS:
 {news_text}
 
 Provide your JSON analysis."""
-        )
-        
-        response = await chat.send_message(user_message)
-        
-        # Parse the JSON response
-        try:
-            # Try to extract JSON from response
-            resp_text = response.strip()
-            if resp_text.startswith('```'):
-                resp_text = resp_text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
-            sentiment_data = json.loads(resp_text)
-        except json.JSONDecodeError:
-            # If parsing fails, create a structured response from the text
-            sentiment_data = {
+    )
+
+    # Hard 20s timeout so a slow Claude response can never hang the endpoint
+    response = await asyncio.wait_for(chat.send_message(user_message), timeout=20.0)
+
+    # Parse the JSON response
+    try:
+        resp_text = response.strip()
+        if resp_text.startswith('```'):
+            resp_text = resp_text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
+        sentiment_data = json.loads(resp_text)
+    except json.JSONDecodeError:
+        sentiment_data = {
+            'overall_sentiment': 'neutral',
+            'confidence': 5,
+            'summary': response[:300] if response else 'Analysis unavailable',
+            'key_drivers': [],
+            'ndx_outlook': '',
+            'risk_factors': [],
+            'trade_bias': ''
+        }
+
+    return {
+        'sentiment': sentiment_data,
+        'generated_at': datetime.now(timezone.utc).isoformat(),
+        'ndx_price': ndx_quote.get('price') if ndx_quote else None,
+        'ndx_change': ndx_quote.get('changePercent') if ndx_quote else None,
+        'news_count': len(finnhub_news) if finnhub_news else 0,
+    }
+
+
+async def _refresh_ai_sentiment_bg():
+    """Background refresh — runs if cache is stale but still usable."""
+    global _ai_sentiment_cache, _ai_sentiment_cache_time, _ai_sentiment_refreshing
+    import time as _time
+    if _ai_sentiment_refreshing:
+        return
+    _ai_sentiment_refreshing = True
+    try:
+        result = await _generate_ai_sentiment()
+        if result.get('sentiment') or not _ai_sentiment_cache:
+            _ai_sentiment_cache = result
+            _ai_sentiment_cache_time = _time.time()
+            logger.info("AI sentiment: background refresh complete")
+    except Exception as e:
+        logger.warning(f"AI sentiment background refresh failed: {e}")
+    finally:
+        _ai_sentiment_refreshing = False
+
+
+@api_router.get("/ai/sentiment")
+async def get_ai_sentiment(user=Depends(get_optional_user)):
+    """AI-powered market sentiment analysis using Claude.
+
+    Strategy:
+      - Fresh (<15 min old): return cached immediately.
+      - Stale (15–60 min old): return cached + kick off a background refresh.
+      - Expired (>60 min or no cache): generate fresh synchronously (with 20s timeout).
+    """
+    global _ai_sentiment_cache, _ai_sentiment_cache_time
+    import time as _time
+    now = _time.time()
+    age = now - _ai_sentiment_cache_time
+
+    if not EMERGENT_LLM_KEY:
+        return {'error': 'AI service not configured', 'sentiment': None}
+
+    # Fresh cache hit
+    if _ai_sentiment_cache and age < AI_SENTIMENT_CACHE_TTL:
+        return _ai_sentiment_cache
+
+    # Stale but usable — serve cache, refresh in background
+    if _ai_sentiment_cache and age < AI_SENTIMENT_HARD_TTL:
+        asyncio.create_task(_refresh_ai_sentiment_bg())
+        return _ai_sentiment_cache
+
+    # Expired or no cache — generate fresh with a lock so only one caller pays the cost
+    try:
+        async with _ai_sentiment_refresh_lock:
+            # Re-check after acquiring lock (another request may have just filled it)
+            now = _time.time()
+            if _ai_sentiment_cache and (now - _ai_sentiment_cache_time) < AI_SENTIMENT_CACHE_TTL:
+                return _ai_sentiment_cache
+
+            result = await _generate_ai_sentiment()
+            if result.get('sentiment'):
+                _ai_sentiment_cache = result
+                _ai_sentiment_cache_time = _time.time()
+                logger.info(f"AI sentiment generated: {result['sentiment'].get('overall_sentiment', 'unknown')}")
+            return result
+    except asyncio.TimeoutError:
+        logger.warning("AI sentiment: Claude call timed out after 20s")
+        if _ai_sentiment_cache:
+            return _ai_sentiment_cache
+        return {
+            'error': 'AI analysis timed out',
+            'sentiment': {
                 'overall_sentiment': 'neutral',
-                'confidence': 5,
-                'summary': response[:300] if response else 'Analysis unavailable',
+                'confidence': 0,
+                'summary': 'AI analysis is taking longer than usual. Please try again shortly.',
                 'key_drivers': [],
                 'ndx_outlook': '',
                 'risk_factors': [],
                 'trade_bias': ''
-            }
-        
-        result = {
-            'sentiment': sentiment_data,
+            },
             'generated_at': datetime.now(timezone.utc).isoformat(),
-            'ndx_price': ndx_quote.get('price') if ndx_quote else None,
-            'ndx_change': ndx_quote.get('changePercent') if ndx_quote else None,
-            'news_count': len(finnhub_news) if finnhub_news else 0,
         }
-        
-        # Cache the result
-        _ai_sentiment_cache = result
-        _ai_sentiment_cache_time = now
-        
-        logger.info(f"AI sentiment generated: {sentiment_data.get('overall_sentiment', 'unknown')}")
-        return result
-        
     except Exception as e:
         logger.error(f"AI sentiment error: {e}")
+        if _ai_sentiment_cache:
+            return _ai_sentiment_cache
         return {
             'error': str(e),
             'sentiment': {
