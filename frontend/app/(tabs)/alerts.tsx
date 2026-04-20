@@ -175,7 +175,7 @@ export default function AlertsScreen() {
 
       <View style={st.header}>
         <View>
-          <View style={st.hRow}><Text style={st.prefix}>⟩</Text><Text style={st.title}>NDX Alerts</Text></View>
+          <View style={st.hRow}><Text style={st.prefix}>⟩</Text><Text style={st.title}>Trade Alerts</Text></View>
           <Text style={st.sub}>Real-time Trade Signals</Text>
         </View>
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>

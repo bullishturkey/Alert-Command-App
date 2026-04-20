@@ -2078,7 +2078,7 @@ async def startup():
     # Seed channels
     channel_defs = [
         ('general', 'General Market Chat', 'Open discussion about markets'),
-        ('ndx-alerts', 'NDX Alerts', 'Real-time NDX trading alerts'),
+        ('trade-alerts', 'Trade Alerts', 'Real-time trading alerts'),
         ('trade-ideas', 'Trade Ideas', 'Share and discuss trade setups'),
         ('macro-news', 'Macro News', 'Macro economic updates and analysis'),
         ('admin-announcements', 'Admin Announcements', 'Official announcements'),
