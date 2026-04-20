@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 
 # Configuration
-BASE_URL = "https://market-preflight.preview.emergentagent.com/api"
+BASE_URL = "https://alerts-command.preview.emergentagent.com/api"
 ADMIN_EMAIL = "admin@ndxcommand.com"
 ADMIN_PASSWORD = "admin123"
 TEST_PUSH_TOKEN = "ExponentPushToken[test123]"
