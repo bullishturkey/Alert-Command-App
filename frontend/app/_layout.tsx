@@ -49,6 +49,10 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (isLoading) return;
+    // Public routes accessible to anyone (including App Store reviewers and guests)
+    const isPublicRoute = segments[0] === 'support';
+    if (isPublicRoute) return;
+
     const inAuthGroup = segments[0] === '(tabs)' || segments[0] === 'admin' || segments[0] === 'stock';
     const authenticated = !!user || isGuest;
     if (!authenticated && inAuthGroup) {
@@ -83,6 +87,7 @@ export default function RootLayout() {
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="admin" options={{ presentation: 'modal', headerShown: true, headerTitle: 'Admin Panel', headerStyle: { backgroundColor: colors.surface }, headerTintColor: colors.textPrimary }} />
             <Stack.Screen name="stock/[symbol]" options={{ headerShown: false }} />
+            <Stack.Screen name="support" options={{ headerShown: false, title: 'Support' }} />
           </Stack>
         </AuthGuard>
       </View>
