@@ -1,6 +1,6 @@
 /**
  * Alerts Command - Design System
- * Inspired by openclaw.ai aesthetic with Green accent
+ * Webull-inspired palette: mint-teal bullish / rose bearish
  */
 
 export const colors = {
@@ -13,18 +13,19 @@ export const colors = {
   // Borders
   border: '#1C1C20',
   borderSubtle: '#141418',
-  borderAccent: 'rgba(0, 200, 5, 0.2)',
+  borderAccent: 'rgba(0, 212, 160, 0.22)',
 
-  // Primary accent
-  green: '#00C805',
-  greenDim: '#00A004',
-  greenBg: 'rgba(0, 200, 5, 0.08)',
-  greenBgStrong: 'rgba(0, 200, 5, 0.15)',
+  // Primary accent — Webull-style mint teal (bullish)
+  green: '#00D4A0',
+  greenDim: '#00A87E',
+  greenBg: 'rgba(0, 212, 160, 0.10)',
+  greenBgStrong: 'rgba(0, 212, 160, 0.18)',
 
-  // Semantic
-  red: '#FF4444',
-  redBg: 'rgba(255, 68, 68, 0.10)',
-  redBgStrong: 'rgba(255, 68, 68, 0.18)',
+  // Semantic — Webull-style rose (bearish)
+  red: '#F5466B',
+  redDim: '#D63B58',
+  redBg: 'rgba(245, 70, 107, 0.10)',
+  redBgStrong: 'rgba(245, 70, 107, 0.18)',
   yellow: '#FFD60A',
   yellowBg: 'rgba(255, 214, 10, 0.10)',
   blue: '#0A84FF',
@@ -37,8 +38,8 @@ export const colors = {
   textMuted: '#404048',
 
   // Sentiment
-  bullish: '#00C805',
-  bearish: '#FF4444',
+  bullish: '#00D4A0',
+  bearish: '#F5466B',
   neutral: '#A0A0A8',
 };
 

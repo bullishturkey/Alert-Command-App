@@ -41,7 +41,20 @@ export function timeAgo(timestamp: string): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-export function getChartHTML(candles: any, symbol: string, theme: 'dark' | 'light' = 'dark'): string {
+// Webull-style palette: mint-teal bullish / rose bearish
+const CHART_GREEN = '#00D4A0';
+const CHART_GREEN_DIM = '#00A87E';
+const CHART_RED = '#F5466B';
+const CHART_RED_DIM = '#D63B58';
+// MA palette (matches charts.tsx): 7MA red, 21MA green, 200MA white, 365MA yellow
+const MA_COLORS_DEFAULT = [CHART_RED, CHART_GREEN, '#FFFFFF', '#FFD60A'];
+
+export function getChartHTML(
+  candles: any,
+  symbol: string,
+  maConfig: number[] = [7, 21],
+  theme: 'dark' | 'light' = 'dark',
+): string {
   if (!candles || !candles.t || candles.t.length === 0) {
     return '<html><body style="background:#000;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:system-ui"><p>No chart data available</p></body></html>';
   }
@@ -55,8 +68,23 @@ export function getChartHTML(candles: any, symbol: string, theme: 'dark' | 'ligh
   const volumeData = candles.t.map((time: number, i: number) => ({
     time,
     value: candles.v[i],
-    color: candles.c[i] >= candles.o[i] ? 'rgba(0,200,5,0.3)' : 'rgba(255,68,68,0.3)',
+    color: candles.c[i] >= candles.o[i] ? 'rgba(0,212,160,0.25)' : 'rgba(245,70,107,0.25)',
   }));
+
+  // Pre-compute MA series server-side to avoid heavy JS execution inside WebView
+  const maSeries: Array<{ period: number; color: string; data: Array<{ time: number; value: number }> }> = [];
+  maConfig.forEach((period, idx) => {
+    if (!period || period <= 0 || data.length < period) return;
+    const color = MA_COLORS_DEFAULT[idx % MA_COLORS_DEFAULT.length];
+    const series: Array<{ time: number; value: number }> = [];
+    for (let i = period - 1; i < data.length; i++) {
+      let sum = 0;
+      for (let j = 0; j < period; j++) sum += data[i - j].close;
+      series.push({ time: data[i].time, value: sum / period });
+    }
+    maSeries.push({ period, color, data: series });
+  });
+
   return `<!DOCTYPE html>
 <html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
@@ -71,11 +99,17 @@ const chart=LightweightCharts.createChart(document.getElementById('chart'),{
   handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false},
   handleScale:{axisPressedMouseMove:true,mouseWheel:true,pinch:true}
 });
-const cs=chart.addCandlestickSeries({upColor:'#00C805',downColor:'#FF4444',borderUpColor:'#00C805',borderDownColor:'#FF4444',wickUpColor:'#00C805',wickDownColor:'#FF4444'});
+const cs=chart.addCandlestickSeries({upColor:'${CHART_GREEN}',downColor:'${CHART_RED}',borderUpColor:'${CHART_GREEN}',borderDownColor:'${CHART_RED}',wickUpColor:'${CHART_GREEN_DIM}',wickDownColor:'${CHART_RED_DIM}'});
 cs.setData(${JSON.stringify(data)});
 const vs=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'vol',scaleMargins:{top:0.8,bottom:0}});
 vs.setData(${JSON.stringify(volumeData)});
 chart.priceScale('vol').applyOptions({scaleMargins:{top:0.8,bottom:0}});
+// Moving averages
+const MA_LIST = ${JSON.stringify(maSeries)};
+MA_LIST.forEach(ma => {
+  const line = chart.addLineSeries({ color: ma.color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'MA' + ma.period });
+  line.setData(ma.data);
+});
 chart.timeScale().fitContent();
 new ResizeObserver(()=>{chart.applyOptions({width:document.body.clientWidth,height:document.body.clientHeight})}).observe(document.body);
 </script></body></html>`;

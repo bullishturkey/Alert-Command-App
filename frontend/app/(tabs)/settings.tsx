@@ -63,7 +63,7 @@ export default function SettingsScreen() {
             name: 'Trade Alerts',
             importance: Notifications.AndroidImportance.MAX,
             vibrationPattern: [0, 250, 250, 250],
-            lightColor: '#00C805',
+            lightColor: '#00D4A0',
             sound: 'default',
           });
         }

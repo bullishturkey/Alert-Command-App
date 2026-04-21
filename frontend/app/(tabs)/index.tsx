@@ -22,7 +22,7 @@ interface Quote {
 }
 
 export default function DashboardScreen() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const router = useRouter();
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [ndx, setNdx] = useState<Quote | null>(null);
@@ -240,9 +240,6 @@ export default function DashboardScreen() {
               <Ionicons name="shield-checkmark" size={18} color={colors.blue} />
             </TouchableOpacity>
           )}
-          <TouchableOpacity testID="logout-btn" style={styles.iconBtn} onPress={logout}>
-            <Ionicons name="log-out-outline" size={18} color={colors.textSecondary} />
-          </TouchableOpacity>
         </View>
       </View>
 

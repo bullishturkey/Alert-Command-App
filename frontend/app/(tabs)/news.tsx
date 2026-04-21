@@ -36,7 +36,22 @@ const SENT_COLOR: Record<string, string> = { bullish: colors.green, bearish: col
 
 function fmtRev(v: number | null) { if (!v) return '-'; if (v >= 1e9) return `$${(v / 1e9).toFixed(1)}B`; if (v >= 1e6) return `$${(v / 1e6).toFixed(0)}M`; return `$${v}`; }
 function isToday(d: string) { return d === new Date().toISOString().split('T')[0]; }
-function fmtTime(utc?: string, fb?: string) { if (utc) { try { const d = new Date(utc); if (!isNaN(d.getTime())) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }); } catch {} } return fb || ''; }
+function fmtTime(utc?: string, fb?: string) {
+  if (utc) {
+    try {
+      // Finnhub returns economic calendar times in UTC as "YYYY-MM-DD HH:mm:ss" (no tz marker).
+      // JS would parse this as LOCAL time — normalize to ISO-UTC so it converts correctly
+      // into the user's device timezone (e.g. 12:30 UTC → 8:30 AM ET).
+      let iso = utc.trim();
+      if (!iso.endsWith('Z') && !/[+-]\d{2}:?\d{2}$/.test(iso)) {
+        iso = iso.replace(' ', 'T') + 'Z';
+      }
+      const d = new Date(iso);
+      if (!isNaN(d.getTime())) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    } catch {}
+  }
+  return fb || '';
+}
 function fmtDate(d: string) { try { return new Date(d + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }); } catch { return d; } }
 
 function guessSentiment(event: EconomicEvent): string {

@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { apiFetch } from '../utils/api';
+import { colors } from '../theme';
 
 export default function AdminScreen() {
   const { user } = useAuth();
@@ -75,7 +76,7 @@ export default function AdminScreen() {
   }
 
   if (loading) {
-    return <View style={styles.center}><ActivityIndicator size="large" color="#00C805" /></View>;
+    return <View style={styles.center}><ActivityIndicator size="large" color={colors.green} /></View>;
   }
 
   const TYPES = ['info', 'bullish', 'bearish', 'neutral'];
@@ -149,7 +150,7 @@ const styles = StyleSheet.create({
   scrollContent: { padding: 20 },
   statsRow: { flexDirection: 'row', gap: 10, marginBottom: 24 },
   statCard: { flex: 1, backgroundColor: '#1C1C1E', borderRadius: 14, padding: 16, alignItems: 'center' },
-  statValue: { color: '#00C805', fontSize: 28, fontWeight: '700' },
+  statValue: { color: colors.green, fontSize: 28, fontWeight: '700' },
   statLabel: { color: '#A1A1AA', fontSize: 12, marginTop: 4 },
   sectionTitle: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 12 },
   formCard: { backgroundColor: '#1C1C1E', borderRadius: 14, padding: 16, marginBottom: 24 },
@@ -157,19 +158,19 @@ const styles = StyleSheet.create({
   textArea: { minHeight: 80, textAlignVertical: 'top' },
   typeRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
   typePill: { flex: 1, paddingVertical: 8, borderRadius: 20, backgroundColor: '#000', alignItems: 'center', borderWidth: 1, borderColor: '#27272A' },
-  typePillActive: { backgroundColor: '#00C805', borderColor: '#00C805' },
+  typePillActive: { backgroundColor: colors.green, borderColor: colors.green },
   typeText: { color: '#A1A1AA', fontSize: 12, fontWeight: '600', textTransform: 'capitalize' },
   typeTextActive: { color: '#000' },
-  sendAlertBtn: { backgroundColor: '#00C805', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  sendAlertBtn: { backgroundColor: colors.green, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   sendAlertBtnDisabled: { opacity: 0.6 },
   sendAlertBtnText: { color: '#000', fontSize: 16, fontWeight: '700' },
   userCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1C1C1E', borderRadius: 12, padding: 14, marginBottom: 8 },
   userInfo: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatarBadge: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#27272A', justifyContent: 'center', alignItems: 'center' },
-  avatarBadgeAdmin: { backgroundColor: 'rgba(0,200,5,0.2)' },
+  avatarBadgeAdmin: { backgroundColor: colors.greenBgStrong },
   avatarText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   userName: { color: '#fff', fontSize: 14, fontWeight: '600' },
   userEmail: { color: '#555', fontSize: 12, marginTop: 2 },
-  adminBadge: { backgroundColor: 'rgba(0,200,5,0.12)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  adminBadgeText: { color: '#00C805', fontSize: 11, fontWeight: '700' },
+  adminBadge: { backgroundColor: colors.greenBg, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  adminBadgeText: { color: colors.green, fontSize: 11, fontWeight: '700' },
 });

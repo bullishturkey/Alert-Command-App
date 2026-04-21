@@ -50,13 +50,13 @@ function StockChart({ candles, symbol }: { candles: any; symbol: string }) {
       }));
       const volData = candles.t.map((time: number, i: number) => ({
         time, value: candles.v[i],
-        color: candles.c[i] >= candles.o[i] ? 'rgba(0,200,5,0.3)' : 'rgba(255,68,68,0.3)',
+        color: candles.c[i] >= candles.o[i] ? 'rgba(0,212,160,0.25)' : 'rgba(245,70,107,0.25)',
       }));
 
       const cs = chart.addCandlestickSeries({
-        upColor: '#00C805', downColor: '#FF4444',
-        borderUpColor: '#00C805', borderDownColor: '#FF4444',
-        wickUpColor: '#00C805', wickDownColor: '#FF4444',
+        upColor: colors.green, downColor: colors.red,
+        borderUpColor: colors.green, borderDownColor: colors.red,
+        wickUpColor: colors.greenDim, wickDownColor: colors.redDim,
       });
       cs.setData(data);
 
@@ -82,7 +82,7 @@ function StockChart({ candles, symbol }: { candles: any; symbol: string }) {
   }
 
   // Native: use WebView with HTML
-  const html = getChartHTML(candles, symbol);
+  const html = getChartHTML(candles, symbol, [7, 21]);
   if (WebView) {
     return <WebView testID="stock-chart-webview" source={{ html }} style={{ flex: 1, backgroundColor: 'transparent' }} scrollEnabled={false} javaScriptEnabled originWhitelist={['*']} />;
   }

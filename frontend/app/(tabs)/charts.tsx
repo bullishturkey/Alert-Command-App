@@ -31,7 +31,7 @@ function WebChart({ candles, maConfig }: { candles: any; maConfig: number[] }) {
         width: node.clientWidth || SW, height: CHART_H,
         layout: { background: { type: 'solid', color: '#000' }, textColor: '#555', fontSize: 10 },
         grid: { vertLines: { color: '#0a0a0a' }, horzLines: { color: '#0a0a0a' } },
-        crosshair: { mode: 0, vertLine: { color: 'rgba(0,200,5,0.3)', width: 1, style: 0, labelBackgroundColor: '#00C805' }, horzLine: { color: 'rgba(0,200,5,0.3)', width: 1, style: 0, labelBackgroundColor: '#00C805' } },
+        crosshair: { mode: 0, vertLine: { color: 'rgba(0,212,160,0.3)', width: 1, style: 0, labelBackgroundColor: colors.green }, horzLine: { color: 'rgba(0,212,160,0.3)', width: 1, style: 0, labelBackgroundColor: colors.green } },
         rightPriceScale: { borderColor: '#111', scaleMargins: { top: 0.05, bottom: 0.2 } },
         timeScale: { borderColor: '#111', timeVisible: true, secondsVisible: false, barSpacing: 8 },
         handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
@@ -39,10 +39,11 @@ function WebChart({ candles, maConfig }: { candles: any; maConfig: number[] }) {
       });
       chartRef.current = chart;
       const data = candles.t.map((t: number, i: number) => ({ time: t, open: candles.o[i], high: candles.h[i], low: candles.l[i], close: candles.c[i] }));
-      const volData = candles.t.map((t: number, i: number) => ({ time: t, value: candles.v[i], color: candles.c[i] >= candles.o[i] ? 'rgba(0,200,5,0.2)' : 'rgba(255,68,68,0.2)' }));
-      const cs = chart.addCandlestickSeries({ upColor: '#00C805', downColor: '#FF4444', borderUpColor: '#00C805', borderDownColor: '#FF4444', wickUpColor: '#00A004', wickDownColor: '#CC3333' });
+      const volData = candles.t.map((t: number, i: number) => ({ time: t, value: candles.v[i], color: candles.c[i] >= candles.o[i] ? 'rgba(0,212,160,0.25)' : 'rgba(245,70,107,0.25)' }));
+      const cs = chart.addCandlestickSeries({ upColor: colors.green, downColor: colors.red, borderUpColor: colors.green, borderDownColor: colors.red, wickUpColor: colors.greenDim, wickDownColor: colors.redDim });
       cs.setData(data);
-      const MA_COLORS = ['#FFD60A', '#FF4444', '#FFFFFF', '#0A84FF'];
+      // 7MA → red, 21MA → green, 200MA → white, 365MA → yellow
+      const MA_COLORS = [colors.red, colors.green, '#FFFFFF', colors.yellow];
       maConfig.forEach((period, idx) => {
         if (data.length < period) return;
         const line = chart.addLineSeries({ color: MA_COLORS[idx % MA_COLORS.length], lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
@@ -105,6 +106,19 @@ export default function ChartsScreen() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // Auto-refresh chart data to keep it as "live" as free API tiers allow.
+  // Finnhub free tier = 60 calls/min. Even the tightest interval here uses < 10/min.
+  useEffect(() => {
+    const intervalMs =
+      tf === '1' ? 15000 :       // 1m → every 15s
+      tf === '5' ? 20000 :       // 5m → every 20s
+      tf === '15' ? 30000 :      // 15m → every 30s
+      tf === '60' ? 60000 :      // 1H → every 1 min
+      300000;                    // 1D → every 5 min
+    const id = setInterval(() => { fetchData(); }, intervalMs);
+    return () => clearInterval(id);
+  }, [fetchData, tf]);
+
   const pos = quote ? quote.changePercent >= 0 : true;
   const ac = pos ? colors.green : colors.red;
   const li = candles?.t?.length ? candles.t.length - 1 : -1;
@@ -117,7 +131,7 @@ export default function ChartsScreen() {
     return sum / period;
   });
 
-  const MA_COLORS = ['#FFD60A', '#FF4444', '#FFFFFF', '#0A84FF'];
+  const MA_COLORS = [colors.red, colors.green, '#FFFFFF', colors.yellow];
 
   const addMA = () => {
     const val = parseInt(maInput);
@@ -223,7 +237,7 @@ export default function ChartsScreen() {
       {/* Chart */}
       <View style={s.chartWrap}>
         {Platform.OS === 'web' ? <WebChart candles={candles} maConfig={maConfig} />
-          : candles ? <NativeChart html={getChartHTML(candles, symbol)} />
+          : candles ? <NativeChart html={getChartHTML(candles, symbol, maConfig)} />
           : <View style={s.chartLoad}><ActivityIndicator size="large" color={colors.green} /></View>}
         {loading && candles && (
           <View style={s.chartOverlay}><ActivityIndicator size="small" color={colors.green} /></View>
