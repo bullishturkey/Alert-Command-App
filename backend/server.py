@@ -1736,7 +1736,7 @@ async def _refresh_ai_sentiment_bg():
 
 
 @api_router.get("/ai/sentiment")
-async def get_ai_sentiment(user=Depends(get_optional_user)):
+async def get_ai_sentiment(user=Depends(get_current_user)):
     """AI-powered market sentiment.
 
     - Weekends (Sat/Sun ET): returns a static 'Week in Review' cached per ISO week.
@@ -1952,7 +1952,7 @@ async def admin_list_users(user=Depends(get_admin_user)):
     users = await db.users.find({}, {'_id': 0, 'password_hash': 0}).sort('created_at', -1).to_list(500)
     return {'users': users, 'total': len(users)}
 
-@api_router.put("/admin/users/{user_id}/revoke")
+@api_router.post("/admin/users/{user_id}/revoke")
 async def admin_revoke_user(user_id: str, user=Depends(get_admin_user)):
     """Admin: Revoke user access"""
     target = await db.users.find_one({'id': user_id})
@@ -1966,7 +1966,7 @@ async def admin_revoke_user(user_id: str, user=Depends(get_admin_user)):
     logger.info(f"User revoked: {target.get('email', user_id)} by admin {user.get('email')}")
     return {'status': 'revoked', 'user_id': user_id}
 
-@api_router.put("/admin/users/{user_id}/restore")
+@api_router.post("/admin/users/{user_id}/restore")
 async def admin_restore_user(user_id: str, user=Depends(get_admin_user)):
     """Admin: Restore revoked user access"""
     target = await db.users.find_one({'id': user_id})

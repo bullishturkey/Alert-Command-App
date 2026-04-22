@@ -457,27 +457,33 @@ test_plan:
 backend:
   - task: "Auth gating on /api/ai/sentiment"
     implemented: true
-    working: false
+    working: true
     file: "/app/backend/server.py"
-    stuck_count: 1
+    stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: false
           agent: "testing"
           comment: "❌ GET /api/ai/sentiment is NOT properly gated. Without any Authorization header the endpoint still returns HTTP 200 with full sentiment payload (mode='daily_recap', overall_sentiment='bullish', etc). Root cause: server.py line 1739 uses Depends(get_optional_user) instead of Depends(get_current_user). Review spec requires this endpoint to reject unauthenticated callers with 401/403 like /api/preflight and /api/alerts do. Main agent must switch get_optional_user → get_current_user on the /api/ai/sentiment route (and verify no callers rely on guest access). /api/preflight (line 757) and /api/alerts (line 863) are correctly gated with get_current_user and returned 401 as expected in the same test run."
+        - working: true
+          agent: "testing"
+          comment: "✅ FIX VERIFIED. server.py:1739 now uses Depends(get_current_user). GET /api/ai/sentiment without Authorization header → HTTP 401 {'detail':'Not authenticated'}. With admin Bearer token → HTTP 200 containing `mode` field (current value 'daily_recap', Tue 2026-04-21 after ET close). Auth gating fully functional."
 
   - task: "Admin revoke/restore HTTP method mismatch"
     implemented: true
-    working: false
+    working: true
     file: "/app/backend/server.py"
-    stuck_count: 1
+    stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: false
           agent: "testing"
           comment: "⚠️ Method mismatch vs review spec. Review request asked for POST /api/admin/users/{id}/revoke and POST /api/admin/users/{id}/restore, but server.py lines 1955 and 1969 define them as PUT. POST returns HTTP 405 Method Not Allowed. The PUT variants are fully functional: PUT /revoke → 200, PUT /restore → 200, end-to-end flow verified (revoked user's token now returns 403 on /preflight, restored user's token returns 200 again, DELETE /admin/users/{id} → 200 and user is removed from /admin/users). Main agent should either (a) change the route decorators from @api_router.put(...) to @api_router.post(...) to match the review/client spec, or (b) add a POST alias alongside the PUT. Frontend/clients calling these endpoints should be audited for the method change."
+        - working: true
+          agent: "testing"
+          comment: "✅ FIX VERIFIED. Route decorators now use @api_router.post(...) at server.py:1955 (revoke) and :1969 (restore). Full E2E flow via POST: (1) Registered throwaway user qa_retest_80494250@alertscommand-test.com → 200 with user_id. (2) Baseline: new user's token → GET /preflight → 200. (3) POST /admin/users/{id}/revoke (admin token) → 200 {'status':'revoked'}. (4) Revoked user's token → GET /preflight → 403 {'detail':'Account access has been revoked'}. (5) POST /admin/users/{id}/restore (admin token) → 200 {'status':'restored'}. (6) Restored user's token → GET /preflight → 200. (7) DELETE /admin/users/{id} (admin token) → 200 {'status':'deleted'}. All 7 steps passed."
 
   - task: "Market state logic (_market_state) in /api/ai/sentiment"
     implemented: true
@@ -528,6 +534,8 @@ backend:
           comment: "✅ GET /api/preflight (authed) returned HTTP 200 in 0.34s (well under 8s target). economic_events array contains 18 items, 18/18 have time_utc matching exact format 'YYYY-MM-DD HH:MM:SS' (space separator, no trailing Z, no T separator). Samples: '2026-04-21 12:15:00', '2026-04-21 12:30:00'. Finnhub live source used ('economic_source' present)."
 
 agent_communication:
+    - agent: "testing"
+      message: "✅ RETEST OF 2 PREVIOUSLY-FAILING CASES — BOTH NOW PASS (10/10 checks via /app/backend_test_retest.py against external URL https://alerts-command.preview.emergentagent.com/api):\n\n[1] AI sentiment auth gating — FIXED ✅\n  • GET /api/ai/sentiment without Authorization header → HTTP 401 {'detail':'Not authenticated'} ✅\n  • GET /api/ai/sentiment with admin Bearer token → HTTP 200 with `mode`='daily_recap' ✅\n  • Code change verified at server.py:1739 — now uses Depends(get_current_user).\n\n[2] Admin revoke/restore via POST — FIXED ✅\n  • Registered throwaway user qa_retest_80494250@alertscommand-test.com — got user_id + token.\n  • Baseline: new user's token → GET /preflight → 200 ✅\n  • POST /api/admin/users/{id}/revoke (admin) → 200 {'status':'revoked'} ✅\n  • Revoked user's token → GET /preflight → 403 'Account access has been revoked' ✅\n  • POST /api/admin/users/{id}/restore (admin) → 200 {'status':'restored'} ✅\n  • Restored user's token → GET /preflight → 200 ✅\n  • DELETE /api/admin/users/{id} (admin) → 200 {'status':'deleted'} ✅\n  • Code change verified at server.py:1955 (revoke) and :1969 (restore) — now @api_router.post(...).\n\nBackend logs confirm: 'User revoked: qa_retest... by admin', 'User restored: ...', 'User deleted by admin: ...'. Both previously-failing tasks are now green. No retesting of passing features was done per instructions."
     - agent: "testing"
       message: "🧪 REVIEW-REQUEST REGRESSION RUN (27/30 passed via /app/backend_test.py against external URL).\n\n❌ CRITICAL FAIL 1 — /api/ai/sentiment auth gating missing:\n  GET /api/ai/sentiment without Bearer token still returns HTTP 200 with full payload (mode='daily_recap', sentiment.overall_sentiment='bullish', etc). Code at server.py:1739 uses Depends(get_optional_user) — must be changed to Depends(get_current_user) to match the review spec. Sibling endpoints /api/preflight (L757) and /api/alerts (L863) are correctly gated and return 401 as expected.\n\n❌ FAIL 2 — Admin revoke/restore method mismatch:\n  Review asked for POST /api/admin/users/{id}/revoke and /restore, but server.py:1955/1969 define them as PUT. POST → 405. Functionality is correct via PUT but clients following the spec will break. Recommend main agent change decorators to @api_router.post(...) OR add POST aliases.\n\n✅ ALL OTHER CHECKS PASS:\n  • /api/preflight, /api/alerts without token → 401 ✅\n  • /api/preflight, /api/alerts, /api/ai/sentiment with admin token → 200 ✅\n  • /api/ai/sentiment `mode` field present, matches US/Eastern time (currently 'daily_recap' — Tue 19:00 ET, after-hours); daily_recap.date_key='2026-04-21', date_label='Apr 21, 2026', indexes=5-entry array ✅\n  • Full revoke/restore/delete flow via PUT: revoked user blocked from /preflight (both old token and freshly re-issued token), restored user regains access, DELETE removes user from /admin/users ✅\n  • Non-admin → GET /admin/users → 403 ✅\n  • GET /preflight authed responded in 0.34s (< 8s), all 18 economic_events have time_utc in exact 'YYYY-MM-DD HH:MM:SS' format with no trailing Z ✅\n\nMain agent: please address the two failures above. Do not re-fix working features."
 
