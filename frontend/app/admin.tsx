@@ -75,6 +75,29 @@ export default function AdminScreen() {
     );
   }
 
+  const revokeUser = async (u: any) => {
+    Alert.alert(
+      'Revoke Access',
+      `Block ${u.username || u.email}? Their session will be forcibly logged out on next API call.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Revoke', style: 'destructive', onPress: async () => {
+          try {
+            await apiFetch(`/api/admin/users/${u.id}/revoke`, { method: 'POST' });
+            fetchData();
+          } catch (e: any) { Alert.alert('Error', e.message); }
+        }}
+      ]
+    );
+  };
+
+  const reinstateUser = async (u: any) => {
+    try {
+      await apiFetch(`/api/admin/users/${u.id}/restore`, { method: 'POST' });
+      fetchData();
+    } catch (e: any) { Alert.alert('Error', e.message); }
+  };
+
   if (loading) {
     return <View style={styles.center}><ActivityIndicator size="large" color={colors.green} /></View>;
   }
@@ -122,20 +145,37 @@ export default function AdminScreen() {
 
         {/* Users */}
         <Text style={styles.sectionTitle}>Users ({users.length})</Text>
-        {users.map(u => (
-          <View key={u.id} style={styles.userCard}>
-            <View style={styles.userInfo}>
-              <View style={[styles.avatarBadge, u.is_admin && styles.avatarBadgeAdmin]}>
-                <Text style={styles.avatarText}>{u.username?.charAt(0)?.toUpperCase() || '?'}</Text>
+        {users.map(u => {
+          const revoked = !!u.is_revoked;
+          return (
+            <View key={u.id} style={[styles.userCard, revoked && { opacity: 0.55, borderWidth: 1, borderColor: colors.red + '66' }]}>
+              <View style={styles.userInfo}>
+                <View style={[styles.avatarBadge, u.is_admin && styles.avatarBadgeAdmin]}>
+                  <Text style={styles.avatarText}>{u.username?.charAt(0)?.toUpperCase() || '?'}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.userName}>{u.username}</Text>
+                    {u.is_admin && <View style={styles.adminBadge}><Text style={styles.adminBadgeText}>Admin</Text></View>}
+                    {revoked && <View style={{ backgroundColor: colors.redBgStrong, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}><Text style={{ color: colors.red, fontSize: 10, fontWeight: '700' }}>REVOKED</Text></View>}
+                  </View>
+                  <Text style={styles.userEmail}>{u.email}</Text>
+                </View>
               </View>
-              <View>
-                <Text style={styles.userName}>{u.username}</Text>
-                <Text style={styles.userEmail}>{u.email}</Text>
-              </View>
+              {!u.is_admin && (
+                revoked ? (
+                  <TouchableOpacity onPress={() => reinstateUser(u)} style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, backgroundColor: colors.greenBgStrong, borderWidth: 1, borderColor: colors.green + '66' }}>
+                    <Text style={{ color: colors.green, fontSize: 12, fontWeight: '700' }}>Reinstate</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity onPress={() => revokeUser(u)} style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.red + '88' }}>
+                    <Text style={{ color: colors.red, fontSize: 12, fontWeight: '700' }}>Revoke</Text>
+                  </TouchableOpacity>
+                )
+              )}
             </View>
-            {u.is_admin && <View style={styles.adminBadge}><Text style={styles.adminBadgeText}>Admin</Text></View>}
-          </View>
-        ))}
+          );
+        })}
       </ScrollView>
     </SafeAreaView>
   );

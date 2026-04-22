@@ -46,8 +46,8 @@ const CHART_GREEN = '#00D4A0';
 const CHART_GREEN_DIM = '#00A87E';
 const CHART_RED = '#F5466B';
 const CHART_RED_DIM = '#D63B58';
-// MA palette (matches charts.tsx): 7MA red, 21MA green, 200MA white, 365MA yellow
-const MA_COLORS_DEFAULT = [CHART_RED, CHART_GREEN, '#FFFFFF', '#FFD60A'];
+// MA palette (matches charts.tsx): 7MA green, 21MA red
+const MA_COLORS_DEFAULT = [CHART_GREEN, CHART_RED, '#FFFFFF', '#FFD60A'];
 
 export function getChartHTML(
   candles: any,

@@ -42,8 +42,8 @@ function WebChart({ candles, maConfig }: { candles: any; maConfig: number[] }) {
       const volData = candles.t.map((t: number, i: number) => ({ time: t, value: candles.v[i], color: candles.c[i] >= candles.o[i] ? 'rgba(0,212,160,0.25)' : 'rgba(245,70,107,0.25)' }));
       const cs = chart.addCandlestickSeries({ upColor: colors.green, downColor: colors.red, borderUpColor: colors.green, borderDownColor: colors.red, wickUpColor: colors.greenDim, wickDownColor: colors.redDim });
       cs.setData(data);
-      // 7MA → red, 21MA → green, 200MA → white, 365MA → yellow
-      const MA_COLORS = [colors.red, colors.green, '#FFFFFF', colors.yellow];
+      // 7MA → green, 21MA → red (matches LOCKED_MAS order)
+      const MA_COLORS = [colors.green, colors.red, '#FFFFFF', colors.yellow];
       maConfig.forEach((period, idx) => {
         if (data.length < period) return;
         const line = chart.addLineSeries({ color: MA_COLORS[idx % MA_COLORS.length], lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
@@ -67,20 +67,18 @@ function WebChart({ candles, maConfig }: { candles: any; maConfig: number[] }) {
   return <View ref={ref} style={{ width: '100%', height: CHART_H, backgroundColor: '#000' }} />;
 }
 
-const TIMEFRAMES = [{ key: '1', label: '1m' }, { key: '5', label: '5m' }, { key: '15', label: '15m' }, { key: '60', label: '1H' }, { key: 'D', label: '1D' }];
-const DEFAULT_MAS = [7, 21];
+// Hard-locked MAs — 7MA (green = shorter-term momentum) + 21MA (red = longer-term trend)
+const LOCKED_MAS = [7, 21];
+const MA_COLORS = [colors.green, colors.red];
 
 export default function ChartsScreen() {
   const [symbol, setSymbol] = useState('NDX');
-  const [tf, setTf] = useState('D');
+  const [tf, setTf] = useState('1');
   const [candles, setCandles] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [quote, setQuote] = useState<any>(null);
   const [watchlist, setWatchlist] = useState<string[]>(['NDX']);
   const [showPicker, setShowPicker] = useState(false);
-  const [maConfig, setMaConfig] = useState<number[]>(DEFAULT_MAS);
-  const [showMaEdit, setShowMaEdit] = useState(false);
-  const [maInput, setMaInput] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -124,22 +122,12 @@ export default function ChartsScreen() {
   const li = candles?.t?.length ? candles.t.length - 1 : -1;
 
   // Calculate current MA values
-  const maValues = maConfig.map(period => {
+  const maValues = LOCKED_MAS.map(period => {
     if (!candles?.c || candles.c.length < period) return null;
     let sum = 0;
     for (let i = candles.c.length - period; i < candles.c.length; i++) sum += candles.c[i];
     return sum / period;
   });
-
-  const MA_COLORS = [colors.red, colors.green, '#FFFFFF', colors.yellow];
-
-  const addMA = () => {
-    const val = parseInt(maInput);
-    if (val > 0 && val <= 365 && !maConfig.includes(val)) {
-      setMaConfig([...maConfig, val]);
-    }
-    setMaInput('');
-  };
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -154,36 +142,6 @@ export default function ChartsScreen() {
                 {symbol === item && <Ionicons name="checkmark" size={18} color={colors.green} />}
               </TouchableOpacity>
             )} />
-          </View>
-        </View>
-      </Modal>
-
-      {/* MA Editor Modal */}
-      <Modal visible={showMaEdit} transparent animationType="fade">
-        <View style={s.pickOverlay}>
-          <View style={[s.pickCard, { maxHeight: SH * 0.4 }]}>
-            <View style={s.pickHead}><Text style={s.pickTitle}>Edit Indicators</Text><TouchableOpacity onPress={() => setShowMaEdit(false)}><Ionicons name="close" size={22} color={colors.textSecondary} /></TouchableOpacity></View>
-            <View style={{ padding: 16 }}>
-              <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>Active Moving Averages:</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-                {maConfig.map((ma, i) => (
-                  <View key={ma} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: MA_COLORS[i % MA_COLORS.length] + '40', gap: 6 }}>
-                    <View style={{ width: 8, height: 3, borderRadius: 1, backgroundColor: MA_COLORS[i % MA_COLORS.length] }} />
-                    <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: '700' }}>MA{ma}</Text>
-                    <TouchableOpacity onPress={() => setMaConfig(maConfig.filter(m => m !== ma))}><Ionicons name="close-circle" size={16} color={colors.textMuted} /></TouchableOpacity>
-                  </View>
-                ))}
-              </View>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bg, borderRadius: 8, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12 }}>
-                  <Text style={{ color: colors.textMuted, fontSize: 13 }}>MA</Text>
-                  <TextInput placeholder="e.g. 50" placeholderTextColor={colors.textMuted} value={maInput} onChangeText={setMaInput} keyboardType="number-pad" style={{ flex: 1, color: '#fff', fontSize: 14, paddingVertical: 10, paddingHorizontal: 6 }} />
-                </View>
-                <TouchableOpacity onPress={addMA} style={{ backgroundColor: colors.green, borderRadius: 8, paddingHorizontal: 16, justifyContent: 'center' }}>
-                  <Text style={{ color: '#000', fontWeight: '700', fontSize: 13 }}>Add</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
           </View>
         </View>
       </Modal>
@@ -309,6 +267,10 @@ const s = StyleSheet.create({
   pickHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
   pickTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
   pickItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle },
+  pickItemOn: { backgroundColor: colors.greenBg },
+  pickSym: { color: '#fff', fontSize: 15, fontWeight: '700' },
+});
+idth: 1, borderBottomColor: colors.borderSubtle },
   pickItemOn: { backgroundColor: colors.greenBg },
   pickSym: { color: '#fff', fontSize: 15, fontWeight: '700' },
 });

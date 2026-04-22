@@ -4,6 +4,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiFetch, timeAgo } from '../../utils/api';
 import { colors, spacing, radius } from '../../theme';
+import { useAuth } from '../../contexts/AuthContext';
+import GuestGate from '../../components/GuestGate';
 
 interface EconomicEvent {
   event: string; date: string; time_utc?: string; time?: string; impact: string; category: string;
@@ -74,10 +76,12 @@ export default function PreflightScreen() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const [aiExpanded, setAiExpanded] = useState(true);
-  const [aiMode, setAiMode] = useState<'live' | 'weekly_recap'>('live');
+  const [aiMode, setAiMode] = useState<'live' | 'weekly_recap' | 'daily_recap'>('live');
   const [weeklyRecap, setWeeklyRecap] = useState<WeeklyRecap | null>(null);
+  const [dailyRecap, setDailyRecap] = useState<any>(null);
   const [ndxPrice, setNdxPrice] = useState<number | null>(null);
   const [ndxChange, setNdxChange] = useState<number | null>(null);
+  const { isGuest } = useAuth();
 
   const fetchData = useCallback(async () => {
     try { const d = await apiFetch('/api/preflight'); setEvents(d.economic_events || []); setEarnings(d.earnings || []); setNews(d.breaking_news || []); }
@@ -94,8 +98,9 @@ export default function PreflightScreen() {
         if (data.ndx_price) setNdxPrice(data.ndx_price);
         if (data.ndx_change !== undefined) setNdxChange(data.ndx_change);
       }
-      setAiMode(data.mode === 'weekly_recap' ? 'weekly_recap' : 'live');
+      setAiMode(data.mode === 'weekly_recap' ? 'weekly_recap' : data.mode === 'daily_recap' ? 'daily_recap' : 'live');
       setWeeklyRecap(data.weekly_recap || null);
+      setDailyRecap(data.daily_recap || null);
       if (data.error && !data.sentiment?.summary) {
         setAiError(data.error);
       }
@@ -107,9 +112,24 @@ export default function PreflightScreen() {
     }
   }, []);
 
-  useEffect(() => { fetchData(); fetchAISentiment(); const i = setInterval(fetchData, 60000); return () => clearInterval(i); }, [fetchData, fetchAISentiment]);
+  useEffect(() => {
+    if (isGuest) return;
+    fetchData(); fetchAISentiment();
+    const i = setInterval(fetchData, 60000);
+    return () => clearInterval(i);
+  }, [fetchData, fetchAISentiment, isGuest]);
 
   const toggleExpand = (i: number) => setExpanded(p => ({ ...p, [i]: !p[i] }));
+
+  if (isGuest) {
+    return (
+      <GuestGate
+        featureName="Preflight"
+        icon="airplane"
+        description="AI-powered daily market brief: economic calendar, earnings, breaking news, and Claude sentiment analysis. Create a free account to unlock."
+      />
+    );
+  }
 
   if (loading) return <View style={st.ctr}><ActivityIndicator size="large" color={colors.green} /></View>;
 
@@ -130,30 +150,38 @@ export default function PreflightScreen() {
 
             {/* AI Sentiment Card */}
             <View style={st.section}>
+              {(() => { return null; })()}
+              {(() => { return null; })()}
               <TouchableOpacity style={st.secHead} onPress={() => setAiExpanded(!aiExpanded)} activeOpacity={0.7}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                  <Ionicons name={aiMode === 'weekly_recap' ? 'calendar' : 'sparkles'} size={16} color={aiMode === 'weekly_recap' ? colors.blue : colors.green} />
-                  <Text style={st.secTitle}>{aiMode === 'weekly_recap' ? 'Week in Review' : 'AI Market Intelligence'}</Text>
+                  <Ionicons name={aiMode !== 'live' ? 'calendar' : 'sparkles'} size={16} color={aiMode !== 'live' ? colors.blue : colors.green} />
+                  <Text style={st.secTitle}>{aiMode === 'weekly_recap' ? 'Week in Review' : aiMode === 'daily_recap' ? "Today's Recap" : 'AI Market Intelligence'}</Text>
                   {aiMode === 'weekly_recap' && weeklyRecap?.week_label ? (
                     <View style={st.weekPill}><Text style={st.weekPillTxt}>{weeklyRecap.week_label}</Text></View>
+                  ) : aiMode === 'daily_recap' && dailyRecap?.date_label ? (
+                    <View style={st.weekPill}><Text style={st.weekPillTxt}>{dailyRecap.date_label}</Text></View>
                   ) : null}
                 </View>
                 <Ionicons name={aiExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
               </TouchableOpacity>
 
-              {aiExpanded && aiMode === 'weekly_recap' && weeklyRecap && (weeklyRecap.indexes.length > 0 || weeklyRecap.top_gainers.length > 0) && (
+              {(() => {
+                const recap: any = aiMode === 'weekly_recap' ? weeklyRecap : aiMode === 'daily_recap' ? dailyRecap : null;
+                if (!aiExpanded || !recap || !(recap.indexes?.length > 0 || recap.top_gainers?.length > 0)) return null;
+                const badgeLabel = aiMode === 'weekly_recap' ? 'MARKETS CLOSED · WEEKEND RECAP' : 'MARKETS CLOSED · DAILY RECAP';
+                return (
                 <View style={st.recapCard}>
                   <View style={st.recapClosedBadge}>
                     <Ionicons name="moon" size={11} color={colors.blue} />
-                    <Text style={st.recapClosedTxt}>MARKETS CLOSED · WEEKEND RECAP</Text>
+                    <Text style={st.recapClosedTxt}>{badgeLabel}</Text>
                   </View>
 
                   {/* Index performance grid */}
-                  {weeklyRecap.indexes.length > 0 && (
+                  {recap.indexes?.length > 0 && (
                     <>
                       <Text style={st.recapSectionLabel}>INDEX PERFORMANCE</Text>
                       <View style={st.indexGrid}>
-                        {weeklyRecap.indexes.map((idx, i) => {
+                        {recap.indexes.map((idx: MoverRow, i: number) => {
                           const isUp = idx.change_pct >= 0;
                           const idxColor = idx.symbol === 'VIX' ? (isUp ? colors.red : colors.green) : (isUp ? colors.green : colors.red);
                           return (
@@ -168,15 +196,15 @@ export default function PreflightScreen() {
                   )}
 
                   {/* Gainers / Losers two-column */}
-                  {(weeklyRecap.top_gainers.length > 0 || weeklyRecap.top_losers.length > 0) && (
+                  {(recap.top_gainers?.length > 0 || recap.top_losers?.length > 0) && (
                     <View style={st.moversWrap}>
-                      {weeklyRecap.top_gainers.length > 0 && (
+                      {recap.top_gainers?.length > 0 && (
                         <View style={st.moversCol}>
                           <View style={st.moversHeader}>
                             <Ionicons name="trending-up" size={11} color={colors.green} />
                             <Text style={[st.moversTitle, { color: colors.green }]}>TOP GAINERS</Text>
                           </View>
-                          {weeklyRecap.top_gainers.map((g, i) => (
+                          {recap.top_gainers.map((g: MoverRow, i: number) => (
                             <View key={i} style={st.moverRow}>
                               <Text style={st.moverSym}>{g.symbol}</Text>
                               <Text style={[st.moverPct, { color: colors.green }]}>+{g.change_pct.toFixed(2)}%</Text>
@@ -184,13 +212,13 @@ export default function PreflightScreen() {
                           ))}
                         </View>
                       )}
-                      {weeklyRecap.top_losers.length > 0 && (
+                      {recap.top_losers?.length > 0 && (
                         <View style={st.moversCol}>
                           <View style={st.moversHeader}>
                             <Ionicons name="trending-down" size={11} color={colors.red} />
-                            <Text style={[st.moversTitle, { color: colors.red }]}>BOTTOM 5</Text>
+                            <Text style={[st.moversTitle, { color: colors.red }]}>{aiMode === 'weekly_recap' ? 'BOTTOM 5' : 'TOP LOSERS'}</Text>
                           </View>
-                          {weeklyRecap.top_losers.map((l, i) => {
+                          {recap.top_losers.map((l: MoverRow, i: number) => {
                             const isDown = l.change_pct < 0;
                             return (
                               <View key={i} style={st.moverRow}>
@@ -204,10 +232,11 @@ export default function PreflightScreen() {
                     </View>
                   )}
                 </View>
-              )}
+                );
+              })()}
 
               {aiExpanded && (
-                <View style={[st.aiCard, aiMode === 'weekly_recap' ? { marginTop: 12 } : null]}>
+                <View style={[st.aiCard, aiMode !== 'live' ? { marginTop: 12 } : null]}>
                   {aiLoading ? (
                     <View style={st.aiLoadingWrap}>
                       <ActivityIndicator size="small" color={colors.green} />

@@ -5,13 +5,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { apiFetch, timeAgo } from '../../utils/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { colors, spacing, radius } from '../../theme';
+import GuestGate from '../../components/GuestGate';
 
 interface AlertItem {
   id: string; title: string; message: string; type: string; ticker: string; price: string; source: string; created_by: string; created_at: string; severity?: string;
 }
 
 export default function AlertsScreen() {
-  const { user } = useAuth();
+  const { user, isGuest } = useAuth();
   const isAdmin = user?.is_admin === true;
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,7 +32,23 @@ export default function AlertsScreen() {
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
-  useEffect(() => { fetchAlerts(); const i = setInterval(fetchAlerts, 5000); return () => clearInterval(i); }, [fetchAlerts]);
+  useEffect(() => {
+    if (isGuest) return;
+    fetchAlerts();
+    const i = setInterval(fetchAlerts, 5000);
+    return () => clearInterval(i);
+  }, [fetchAlerts, isGuest]);
+
+  // Guest gate — alerts are account-only
+  if (isGuest) {
+    return (
+      <GuestGate
+        featureName="Trade Alerts"
+        icon="notifications"
+        description="Real-time trade alerts from our admins and TradingView webhook pipeline. Create a free account to receive instant push notifications when new signals post."
+      />
+    );
+  }
 
   const deleteAlert = async (id: string) => {
     try { await apiFetch(`/api/alerts/${id}`, { method: 'DELETE' }); fetchAlerts(); }

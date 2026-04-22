@@ -754,7 +754,7 @@ def get_economic_events_for_week(today: datetime) -> list:
     return events
 
 @api_router.get("/preflight")
-async def get_preflight(user=Depends(get_optional_user)):
+async def get_preflight(user=Depends(get_current_user)):
     """Daily preflight briefing: economic calendar, earnings, breaking news.
     All external fetches run in parallel for speed."""
     now = datetime.now(timezone.utc)
@@ -860,8 +860,8 @@ async def add_economic_event(body: dict = Body(...), user=Depends(get_admin_user
 # ALERT ENDPOINTS (NDX Trading Pipeline)
 # =====================
 @api_router.get("/alerts")
-async def get_alerts(user=Depends(get_optional_user)):
-    """Get NDX trading alerts - only from webhook pipeline and admin"""
+async def get_alerts(user=Depends(get_current_user)):
+    """Get NDX trading alerts - only from webhook pipeline and admin. Requires auth."""
     alerts = await db.alerts.find(
         {'source': {'$in': ['webhook', 'pipedream', 'tradingview', 'admin', 'signal']}},
         {'_id': 0}
@@ -1235,21 +1235,55 @@ AI_SENTIMENT_HARD_TTL = 3600           # 60 min — beyond this, force fresh fet
 # Weekly recap cache (keyed by ISO week, e.g. "2026-W16")
 _weekly_recap_cache: Dict[str, Dict[str, Any]] = {}
 _weekly_recap_lock = asyncio.Lock()
+# Daily after-hours recap — keyed by YYYY-MM-DD trading day
+_daily_recap_cache: Dict[str, Dict[str, Any]] = {}
+_daily_recap_lock = asyncio.Lock()
+
+
+def _market_state() -> str:
+    """Return one of: 'open', 'after_hours', 'weekend'.
+    - 'open':        Mon-Fri 9:30 AM - 4:00 PM ET (regular session)
+    - 'after_hours': Mon-Fri outside regular hours (pre-market, post-market)
+    - 'weekend':     Sat / Sun ET
+    Intra-week holidays aren't handled — they just read as 'after_hours' most of the day, which is fine."""
+    try:
+        from datetime import datetime as _dt, time as _time_cls
+        from zoneinfo import ZoneInfo
+        et_now = _dt.now(ZoneInfo("America/New_York"))
+    except Exception:
+        return 'open'  # fallback: assume open if tz data missing
+    # Sat=5, Sun=6
+    if et_now.weekday() >= 5:
+        return 'weekend'
+    t = et_now.time()
+    market_open = _time_cls(9, 30)
+    market_close = _time_cls(16, 0)  # 4:00 PM ET
+    if market_open <= t < market_close:
+        return 'open'
+    return 'after_hours'
 
 
 def _is_market_closed_now() -> bool:
-    """True on weekends (Sat/Sun US Eastern). Intra-week holidays not handled here —
-    they just fall through to live mode, which is fine for MVP."""
-    # US Eastern time defines market hours
+    """Legacy helper: True for weekend only (used where weekly recap was previously gated)."""
+    return _market_state() == 'weekend'
+
+
+def _current_trading_day_key() -> str:
+    """Returns YYYY-MM-DD for the most recent completed/in-progress US trading day in ET.
+    Used as the cache key for the daily after-hours recap."""
     try:
         from datetime import datetime as _dt
         from zoneinfo import ZoneInfo
         et_now = _dt.now(ZoneInfo("America/New_York"))
-        # weekday(): Mon=0 ... Sun=6
-        return et_now.weekday() >= 5  # Sat=5, Sun=6
     except Exception:
-        # Fallback: naive UTC weekday check (close enough)
-        return datetime.now(timezone.utc).weekday() >= 5
+        et_now = datetime.now(timezone.utc)
+    # If it's weekend, roll back to Friday for the recap target date
+    wd = et_now.weekday()
+    if wd == 5:  # Sat
+        et_now = et_now - timedelta(days=1)
+    elif wd == 6:  # Sun
+        et_now = et_now - timedelta(days=2)
+    return et_now.strftime('%Y-%m-%d')
 
 
 def _current_iso_week_key() -> str:
@@ -1471,6 +1505,121 @@ Provide your JSON analysis.""")
     }
 
 
+async def _generate_daily_recap() -> Dict[str, Any]:
+    """Generate the weekday after-hours 'Today's Recap' payload.
+    Similar to weekly recap, but focused on single-day performance."""
+    if not EMERGENT_LLM_KEY:
+        return {'error': 'AI service not configured', 'sentiment': None, 'mode': 'daily_recap'}
+
+    movers, finnhub_news = await asyncio.gather(
+        _fetch_weekly_movers(),   # reuse helper — it returns current perf vs prior close
+        fetch_finnhub_news(),
+        return_exceptions=False,
+    )
+
+    # Pick up to 6 most recent news items
+    key_news = []
+    for item in (finnhub_news or [])[:8]:
+        headline = item.get('headline', '')
+        summary = item.get('summary', '')
+        key_news.append({
+            'headline': headline,
+            'source': item.get('source', 'Unknown'),
+            'summary': summary[:250],
+            'sentiment': simple_sentiment(headline + ' ' + summary),
+            'url': item.get('url', ''),
+            'timestamp': datetime.fromtimestamp(item.get('datetime', 0), tz=timezone.utc).isoformat() if item.get('datetime') else datetime.now(timezone.utc).isoformat()
+        })
+
+    news_text = "\n".join(f"- [{n['source']}] {n['headline']}. {n['summary'][:150]}" for n in key_news[:6])
+    indexes_text = "\n".join(f"- {i['name']} ({i['symbol']}): {i['change_pct']:+.2f}% (close ${i['price']})" for i in movers.get('indexes', []))
+    gainers_text = "\n".join(f"- {g['symbol']} ({g['name']}): {g['change_pct']:+.2f}%" for g in movers.get('top_gainers', [])[:3])
+    losers_text = "\n".join(f"- {l['symbol']} ({l['name']}): {l['change_pct']:+.2f}%" for l in movers.get('top_losers', [])[:3])
+
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+    today_key = _current_trading_day_key()
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"ndx-daily-{today_key}",
+        system_message="""You are a senior market analyst writing a post-close 'Today's Recap' brief for a Nasdaq-100 (NDX) trading community.
+Markets just closed for the day; produce a concise, static recap of how today's session played out and what to watch tomorrow.
+
+Respond ONLY with valid JSON in this exact format:
+{
+  "overall_sentiment": "bullish" | "bearish" | "neutral",
+  "confidence": 1-10,
+  "summary": "2-3 sentence recap of today's market action",
+  "key_drivers": ["driver 1", "driver 2", "driver 3"],
+  "ndx_outlook": "1-2 sentence take on tomorrow's open",
+  "risk_factors": ["risk 1", "risk 2"],
+  "trade_bias": "Brief actionable stance for the next session"
+}
+
+Be direct, professional, trading-focused. No disclaimers."""
+    )
+    chat.with_model("anthropic", "claude-4-sonnet-20250514")
+    chat.with_params(timeout=15, num_retries=0)
+
+    user_msg = UserMessage(text=f"""Post-close recap for {today_key} — produce JSON analysis.
+
+TODAY'S INDEX PERFORMANCE:
+{indexes_text or '(data unavailable)'}
+
+TOP GAINERS (NDX-100 tracked, today):
+{gainers_text or '(none)'}
+
+TOP LOSERS (NDX-100 tracked, today):
+{losers_text or '(none)'}
+
+KEY NEWS TODAY:
+{news_text or '(no news available)'}
+
+Provide your JSON analysis.""")
+
+    sentiment_data: Dict[str, Any] = {
+        'overall_sentiment': 'neutral',
+        'confidence': 0,
+        'summary': "Today's recap summary unavailable.",
+        'key_drivers': [],
+        'ndx_outlook': '',
+        'risk_factors': [],
+        'trade_bias': ''
+    }
+    try:
+        response = await chat.send_message(user_msg)
+        resp_text = response.strip()
+        if resp_text.startswith('```'):
+            resp_text = resp_text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
+        sentiment_data = json.loads(resp_text)
+    except Exception as e:
+        logger.warning(f"Daily recap Claude call failed: {e} — returning movers-only recap")
+
+    # Human-readable date label like "Apr 21, 2026"
+    try:
+        dt_obj = datetime.strptime(today_key, '%Y-%m-%d')
+        date_label = dt_obj.strftime('%b %-d, %Y') if hasattr(dt_obj, 'strftime') else today_key
+    except Exception:
+        date_label = today_key
+
+    return {
+        'mode': 'daily_recap',
+        'sentiment': sentiment_data,
+        'daily_recap': {
+            'date_key': today_key,
+            'date_label': date_label,
+            'indexes': movers.get('indexes', []),
+            'top_gainers': movers.get('top_gainers', []),
+            'top_losers': movers.get('top_losers', []),
+            'key_news': key_news,
+        },
+        'generated_at': datetime.now(timezone.utc).isoformat(),
+        'ndx_price': next((i['price'] for i in movers.get('indexes', []) if i['symbol'] == 'NDX'), None),
+        'ndx_change': next((i['change_pct'] for i in movers.get('indexes', []) if i['symbol'] == 'NDX'), None),
+        'news_count': len(key_news),
+    }
+
+
 async def _generate_ai_sentiment() -> Dict[str, Any]:
     """Fetch data + call Claude. Used by the endpoint and the background refresher."""
     if not EMERGENT_LLM_KEY:
@@ -1601,8 +1750,10 @@ async def get_ai_sentiment(user=Depends(get_optional_user)):
     if not EMERGENT_LLM_KEY:
         return {'error': 'AI service not configured', 'sentiment': None}
 
-    # === Weekend: weekly recap mode ===
-    if _is_market_closed_now():
+    # === Market closed (weekend OR weekday after-hours) ===
+    state = _market_state()
+
+    if state == 'weekend':
         week_key = _current_iso_week_key()
         cached = _weekly_recap_cache.get(week_key)
         if cached:
@@ -1637,6 +1788,46 @@ async def get_ai_sentiment(user=Depends(get_optional_user)):
                     'weekly_recap': {
                         'week_key': week_key,
                         'week_label': _week_label(week_key),
+                        'indexes': [],
+                        'top_gainers': [],
+                        'top_losers': [],
+                        'key_news': [],
+                    },
+                    'generated_at': datetime.now(timezone.utc).isoformat(),
+                }
+
+    if state == 'after_hours':
+        day_key = _current_trading_day_key()
+        cached = _daily_recap_cache.get(day_key)
+        if cached:
+            return cached
+        async with _daily_recap_lock:
+            cached = _daily_recap_cache.get(day_key)
+            if cached:
+                return cached
+            try:
+                result = await _generate_daily_recap()
+                if result.get('daily_recap', {}).get('indexes') or result.get('daily_recap', {}).get('top_gainers'):
+                    _daily_recap_cache[day_key] = result
+                    logger.info(f"Daily recap generated and cached for {day_key}")
+                return result
+            except Exception as e:
+                logger.error(f"Daily recap generation failed: {e}")
+                return {
+                    'mode': 'daily_recap',
+                    'error': str(e),
+                    'sentiment': {
+                        'overall_sentiment': 'neutral',
+                        'confidence': 0,
+                        'summary': "Today's recap temporarily unavailable. Please try again shortly.",
+                        'key_drivers': [],
+                        'ndx_outlook': '',
+                        'risk_factors': [],
+                        'trade_bias': ''
+                    },
+                    'daily_recap': {
+                        'date_key': day_key,
+                        'date_label': day_key,
                         'indexes': [],
                         'top_gainers': [],
                         'top_losers': [],
@@ -1712,18 +1903,6 @@ async def get_ai_sentiment(user=Depends(get_optional_user)):
 # =====================
 # ADMIN ENDPOINTS
 # =====================
-@api_router.get("/admin/users")
-async def get_users(user=Depends(get_admin_user)):
-    users = await db.users.find({}, {'_id': 0, 'password_hash': 0}).to_list(500)
-    return {'users': users}
-
-@api_router.delete("/admin/users/{user_id}")
-async def delete_user(user_id: str, user=Depends(get_admin_user)):
-    result = await db.users.delete_one({'id': user_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail='User not found')
-    return {'status': 'deleted'}
-
 @api_router.post("/admin/broadcast")
 async def broadcast_alert(data: AlertCreate, user=Depends(get_admin_user)):
     alert = {
