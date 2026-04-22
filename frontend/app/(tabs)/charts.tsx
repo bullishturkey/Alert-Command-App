@@ -270,7 +270,3 @@ const s = StyleSheet.create({
   pickItemOn: { backgroundColor: colors.greenBg },
   pickSym: { color: '#fff', fontSize: 15, fontWeight: '700' },
 });
-idth: 1, borderBottomColor: colors.borderSubtle },
-  pickItemOn: { backgroundColor: colors.greenBg },
-  pickSym: { color: '#fff', fontSize: 15, fontWeight: '700' },
-});
