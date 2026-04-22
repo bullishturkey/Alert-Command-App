@@ -40,12 +40,26 @@ export function useNotifications(isAuthenticated: boolean) {
     });
 
     return () => {
-      if (notificationListener.current) {
-        Notifications.removeNotificationSubscription(notificationListener.current);
-      }
-      if (responseListener.current) {
-        Notifications.removeNotificationSubscription(responseListener.current);
-      }
+      // Newer expo-notifications (SDK 52+) removed `removeNotificationSubscription`.
+      // Use the subscription's `.remove()` method instead, with a safe fallback.
+      try {
+        if (notificationListener.current) {
+          if (typeof notificationListener.current.remove === 'function') {
+            notificationListener.current.remove();
+          } else if (typeof (Notifications as any).removeNotificationSubscription === 'function') {
+            (Notifications as any).removeNotificationSubscription(notificationListener.current);
+          }
+        }
+      } catch (e) { /* ignore cleanup errors */ }
+      try {
+        if (responseListener.current) {
+          if (typeof responseListener.current.remove === 'function') {
+            responseListener.current.remove();
+          } else if (typeof (Notifications as any).removeNotificationSubscription === 'function') {
+            (Notifications as any).removeNotificationSubscription(responseListener.current);
+          }
+        }
+      } catch (e) { /* ignore cleanup errors */ }
     };
   }, [isAuthenticated]);
 }

@@ -37,7 +37,18 @@ const CAT_ICON: Record<string, string> = { fed: 'business', inflation: 'trending
 const SENT_COLOR: Record<string, string> = { bullish: colors.green, bearish: colors.red, neutral: colors.textSecondary };
 
 function fmtRev(v: number | null) { if (!v) return '-'; if (v >= 1e9) return `$${(v / 1e9).toFixed(1)}B`; if (v >= 1e6) return `$${(v / 1e6).toFixed(0)}M`; return `$${v}`; }
-function isToday(d: string) { return d === new Date().toISOString().split('T')[0]; }
+function localYMD(dt: Date) {
+  // YYYY-MM-DD in the user's LOCAL timezone (not UTC).
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const d = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+function isToday(d: string) { return d === localYMD(new Date()); }
+function isTomorrow(d: string) {
+  const t = new Date(); t.setDate(t.getDate() + 1);
+  return d === localYMD(t);
+}
 function fmtTime(utc?: string, fb?: string) {
   if (utc) {
     try {
@@ -339,8 +350,11 @@ export default function PreflightScreen() {
                   const imp = IMPACT[ev.impact] || IMPACT.medium;
                   const icon = CAT_ICON[ev.category] || 'analytics';
                   const td = isToday(ev.date);
+                  const tm = !td && isTomorrow(ev.date);
                   const lt = fmtTime(ev.time_utc, ev.time);
                   const ld = fmtDate(ev.date);
+                  const dateLabel = td ? 'TODAY' : tm ? 'TOMORROW' : ld;
+                  const dateHighlight = td || tm;
                   const sent = ev.sentiment || guessSentiment(ev);
                   const sentColorEv = SENT_COLOR[sent] || colors.textSecondary;
                   const isExp = expanded[i] === true;

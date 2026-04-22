@@ -67,6 +67,8 @@ function WebChart({ candles, maConfig }: { candles: any; maConfig: number[] }) {
   return <View ref={ref} style={{ width: '100%', height: CHART_H, backgroundColor: '#000' }} />;
 }
 
+const TIMEFRAMES = [{ key: '1', label: '1m' }, { key: '5', label: '5m' }, { key: '15', label: '15m' }, { key: '60', label: '1H' }, { key: 'D', label: '1D' }];
+
 // Hard-locked MAs — 7MA (green = shorter-term momentum) + 21MA (red = longer-term trend)
 const LOCKED_MAS = [7, 21];
 const MA_COLORS = [colors.green, colors.red];
@@ -181,21 +183,23 @@ export default function ChartsScreen() {
         </View>
       )}
 
-      {/* MA Indicator Labels */}
-      <TouchableOpacity style={s.maRow} onPress={() => setShowMaEdit(true)}>
-        <Text style={s.maLabel}>MA({maConfig.join(',')})</Text>
-        {maConfig.map((ma, i) => (
-          <Text key={ma} style={[s.maVal, { color: MA_COLORS[i % MA_COLORS.length] }]}>
-            MA{ma}:{maValues[i] != null ? maValues[i]!.toFixed(2) : '-'}
-          </Text>
+      {/* MA Indicator Labels (horizontally scrollable on narrow screens) */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.maRow}>
+        <Text style={s.maLabel}>MA({LOCKED_MAS.join(',')})</Text>
+        {LOCKED_MAS.map((ma, i) => (
+          <View key={ma} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <View style={{ width: 8, height: 2, borderRadius: 1, backgroundColor: MA_COLORS[i] }} />
+            <Text style={[s.maVal, { color: MA_COLORS[i] }]}>
+              MA{ma}: {maValues[i] != null ? maValues[i]!.toFixed(2) : '-'}
+            </Text>
+          </View>
         ))}
-        <Ionicons name="settings-outline" size={12} color={colors.textMuted} style={{ marginLeft: 4 }} />
-      </TouchableOpacity>
+      </ScrollView>
 
       {/* Chart */}
       <View style={s.chartWrap}>
-        {Platform.OS === 'web' ? <WebChart candles={candles} maConfig={maConfig} />
-          : candles ? <NativeChart html={getChartHTML(candles, symbol, maConfig)} />
+        {Platform.OS === 'web' ? <WebChart candles={candles} maConfig={LOCKED_MAS} />
+          : candles ? <NativeChart html={getChartHTML(candles, symbol, LOCKED_MAS)} />
           : <View style={s.chartLoad}><ActivityIndicator size="large" color={colors.green} /></View>}
         {loading && candles && (
           <View style={s.chartOverlay}><ActivityIndicator size="small" color={colors.green} /></View>
