@@ -66,7 +66,16 @@ export default function AlertsScreen() {
     if (!newMsg.trim()) return;
     setSending(true);
     try {
-      await apiFetch('/api/alerts/webhook', { method: 'POST', body: JSON.stringify({ content: newMsg.trim() }) });
+      await apiFetch('/api/alerts', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: newTitle.trim() || 'Trade Signal',
+          message: newMsg.trim(),
+          ticker: (newTicker.trim() || 'NDX').toUpperCase(),
+          type: 'info',
+          severity: newSeverity || 'high',
+        }),
+      });
       resetForm(); setShowCreate(false); fetchAlerts();
     } catch (e: any) { Alert.alert('Error', e.message || 'Failed to send'); }
     finally { setSending(false); }

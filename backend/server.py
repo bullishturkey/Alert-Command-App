@@ -1298,12 +1298,11 @@ def _current_iso_week_key() -> str:
     return f"{iso_year}-W{iso_week:02d}"
 
 
-def _fetch_weekly_movers_yf() -> Dict[str, Any]:
-    """Fetch weekly % change for major indexes and tracked stocks.
-    Runs in thread pool (yfinance is sync)."""
+def _fetch_daily_movers_yf() -> Dict[str, Any]:
+    """Fetch SINGLE-DAY % change for indexes and tracked stocks (for after-hours daily recap).
+    Uses last 2 trading days: today_close vs prior_close."""
     import yfinance as _yf
 
-    # Major market indexes
     index_specs = [
         ('^NDX', 'Nasdaq 100'),
         ('^GSPC', 'S&P 500'),
@@ -1311,17 +1310,94 @@ def _fetch_weekly_movers_yf() -> Dict[str, Any]:
         ('^RUT', 'Russell 2000'),
         ('^VIX', 'VIX (Volatility)'),
     ]
-    # Tracked NDX-100 stocks (excluding indexes/ETFs)
+    stock_symbols = ['NVDA', 'MSFT', 'AAPL', 'AMZN', 'META', 'TSLA', 'AMD', 'AVGO', 'GOOGL', 'QQQ']
+
+    def _day_pct(symbol: str) -> Optional[Dict[str, Any]]:
+        try:
+            t = _yf.Ticker(symbol)
+            hist = t.history(period='5d', interval='1d')
+            if hist.empty or len(hist) < 2:
+                return None
+            prior_close = float(hist['Close'].iloc[-2])
+            today_close = float(hist['Close'].iloc[-1])
+            if prior_close <= 0:
+                return None
+            pct = round(((today_close - prior_close) / prior_close) * 100, 2)
+            return {
+                'symbol': symbol.lstrip('^'),
+                'price': round(today_close, 2),
+                'change_pct': pct,
+                'open_week': round(prior_close, 2),  # reused as prior_close
+            }
+        except Exception as e:
+            logger.warning(f"Daily movers yfinance error for {symbol}: {e}")
+            return None
+
+    indexes = []
+    for sym, name in index_specs:
+        row = _day_pct(sym)
+        if row:
+            row['name'] = name
+            indexes.append(row)
+
+    stock_rows = []
+    for sym in stock_symbols:
+        row = _day_pct(sym)
+        if row:
+            row['name'] = TRACKED_SYMBOLS.get(sym, {}).get('name', sym)
+            stock_rows.append(row)
+
+    stock_rows.sort(key=lambda r: r['change_pct'], reverse=True)
+    return {
+        'indexes': indexes,
+        'top_gainers': stock_rows[:5],
+        'top_losers': list(reversed(stock_rows[-5:])) if len(stock_rows) >= 5 else [],
+    }
+
+
+async def _fetch_daily_movers() -> Dict[str, Any]:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, _fetch_daily_movers_yf)
+
+
+def _fetch_weekly_movers_yf() -> Dict[str, Any]:
+    """Fetch weekly % change scoped to THIS CURRENT calendar week (Monday → now).
+    Runs in thread pool (yfinance is sync)."""
+    import yfinance as _yf
+    from datetime import datetime as _dt
+
+    # Current week's Monday in US Eastern (market time)
+    try:
+        from zoneinfo import ZoneInfo
+        et_now = _dt.now(ZoneInfo("America/New_York"))
+    except Exception:
+        et_now = datetime.now(timezone.utc)
+    monday = et_now - timedelta(days=et_now.weekday())
+    # Download 2 weeks of history so we can safely find this Monday's open + latest close
+    start = (monday - timedelta(days=3)).strftime('%Y-%m-%d')
+
+    index_specs = [
+        ('^NDX', 'Nasdaq 100'),
+        ('^GSPC', 'S&P 500'),
+        ('^DJI', 'Dow Jones'),
+        ('^RUT', 'Russell 2000'),
+        ('^VIX', 'VIX (Volatility)'),
+    ]
     stock_symbols = ['NVDA', 'MSFT', 'AAPL', 'AMZN', 'META', 'TSLA', 'AMD', 'AVGO', 'GOOGL', 'QQQ']
 
     def _pct_change(symbol: str) -> Optional[Dict[str, Any]]:
         try:
             t = _yf.Ticker(symbol)
-            hist = t.history(period='7d', interval='1d')
+            hist = t.history(start=start, interval='1d')
             if hist.empty or len(hist) < 2:
                 return None
-            open_price = float(hist['Open'].iloc[0])
-            close_price = float(hist['Close'].iloc[-1])
+            # Filter to rows from this calendar week's Monday onward
+            week_rows = hist[hist.index.date >= monday.date()]
+            if week_rows.empty:
+                # Market hasn't opened this week yet (e.g. early Monday pre-market) — fall back to last row
+                week_rows = hist.tail(1)
+            open_price = float(week_rows['Open'].iloc[0])
+            close_price = float(week_rows['Close'].iloc[-1])
             if open_price <= 0:
                 return None
             pct = round(((close_price - open_price) / open_price) * 100, 2)
@@ -1512,7 +1588,7 @@ async def _generate_daily_recap() -> Dict[str, Any]:
         return {'error': 'AI service not configured', 'sentiment': None, 'mode': 'daily_recap'}
 
     movers, finnhub_news = await asyncio.gather(
-        _fetch_weekly_movers(),   # reuse helper — it returns current perf vs prior close
+        _fetch_daily_movers(),    # 1-day % change (yesterday close → today close)
         fetch_finnhub_news(),
         return_exceptions=False,
     )

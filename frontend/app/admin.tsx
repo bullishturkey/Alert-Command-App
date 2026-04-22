@@ -105,7 +105,16 @@ export default function AdminScreen() {
   const TYPES = ['info', 'bullish', 'bearish', 'neutral'];
 
   return (
-    <SafeAreaView style={styles.safe} edges={['bottom']}>
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      {/* Header with back button */}
+      <View style={styles.pageHeader}>
+        <TouchableOpacity testID="admin-back-btn-top" style={styles.headerBackBtn} onPress={() => router.back()} activeOpacity={0.7}>
+          <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
+          <Text style={styles.headerBackLabel}>Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.pageTitle}>Admin Panel</Text>
+        <View style={styles.headerBackBtn} />
+      </View>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Stats */}
         <View style={styles.statsRow}>
@@ -148,28 +157,28 @@ export default function AdminScreen() {
         {users.map(u => {
           const revoked = !!u.is_revoked;
           return (
-            <View key={u.id} style={[styles.userCard, revoked && { opacity: 0.55, borderWidth: 1, borderColor: colors.red + '66' }]}>
+            <View key={u.id} style={[styles.userCard, revoked && { opacity: 0.7, borderWidth: 1, borderColor: colors.red + '66' }]}>
               <View style={styles.userInfo}>
                 <View style={[styles.avatarBadge, u.is_admin && styles.avatarBadgeAdmin]}>
                   <Text style={styles.avatarText}>{u.username?.charAt(0)?.toUpperCase() || '?'}</Text>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={styles.userName}>{u.username}</Text>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <Text style={styles.userName} numberOfLines={1}>{u.username}</Text>
                     {u.is_admin && <View style={styles.adminBadge}><Text style={styles.adminBadgeText}>Admin</Text></View>}
                     {revoked && <View style={{ backgroundColor: colors.redBgStrong, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}><Text style={{ color: colors.red, fontSize: 10, fontWeight: '700' }}>REVOKED</Text></View>}
                   </View>
-                  <Text style={styles.userEmail}>{u.email}</Text>
+                  <Text style={styles.userEmail} numberOfLines={1} ellipsizeMode="tail">{u.email}</Text>
                 </View>
               </View>
               {!u.is_admin && (
                 revoked ? (
-                  <TouchableOpacity onPress={() => reinstateUser(u)} style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, backgroundColor: colors.greenBgStrong, borderWidth: 1, borderColor: colors.green + '66' }}>
-                    <Text style={{ color: colors.green, fontSize: 12, fontWeight: '700' }}>Reinstate</Text>
+                  <TouchableOpacity onPress={() => reinstateUser(u)} style={styles.actionBtnReinstate}>
+                    <Text style={styles.actionBtnReinstateTxt}>Reinstate</Text>
                   </TouchableOpacity>
                 ) : (
-                  <TouchableOpacity onPress={() => revokeUser(u)} style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.red + '88' }}>
-                    <Text style={{ color: colors.red, fontSize: 12, fontWeight: '700' }}>Revoke</Text>
+                  <TouchableOpacity onPress={() => revokeUser(u)} style={styles.actionBtnRevoke}>
+                    <Text style={styles.actionBtnRevokeTxt}>Revoke</Text>
                   </TouchableOpacity>
                 )
               )}
@@ -204,8 +213,16 @@ const styles = StyleSheet.create({
   sendAlertBtn: { backgroundColor: colors.green, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   sendAlertBtnDisabled: { opacity: 0.6 },
   sendAlertBtnText: { color: '#000', fontSize: 16, fontWeight: '700' },
-  userCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1C1C1E', borderRadius: 12, padding: 14, marginBottom: 8 },
-  userInfo: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  userCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1C1C1E', borderRadius: 12, padding: 14, marginBottom: 8, gap: 10 },
+  userInfo: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 },
+  actionBtnRevoke: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.red + '88', flexShrink: 0 },
+  actionBtnRevokeTxt: { color: colors.red, fontSize: 12, fontWeight: '700' },
+  actionBtnReinstate: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, backgroundColor: colors.greenBgStrong, borderWidth: 1, borderColor: colors.green + '66', flexShrink: 0 },
+  actionBtnReinstateTxt: { color: colors.green, fontSize: 12, fontWeight: '700' },
+  pageHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
+  headerBackBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4, paddingVertical: 6, minWidth: 72 },
+  headerBackLabel: { color: colors.textPrimary, fontSize: 16, fontWeight: '500', marginLeft: 2 },
+  pageTitle: { color: colors.textPrimary, fontSize: 17, fontWeight: '700' },
   avatarBadge: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#27272A', justifyContent: 'center', alignItems: 'center' },
   avatarBadgeAdmin: { backgroundColor: colors.greenBgStrong },
   avatarText: { color: '#fff', fontSize: 15, fontWeight: '700' },
