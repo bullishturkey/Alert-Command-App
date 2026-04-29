@@ -80,6 +80,41 @@ TRACKED_SYMBOLS = {
     'GOOGL': {'name': 'Alphabet Inc', 'base_price': 178, 'sector': 'Internet Services'},
 }
 
+# === MEGA-CAP EARNINGS WATCHLIST ===
+# Companies with ~$600B+ market cap (as of Feb 2026). Updated periodically.
+# Used for /api/preflight earnings calendar filtering — want every mega-cap print on radar.
+# Includes a buffer for borderline $500-600B names since caps fluctuate day-to-day.
+MEGA_CAP_EARNINGS_SYMBOLS = {
+    # $1T+ club
+    'NVDA', 'AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'META', 'TSLA', 'AVGO',
+    'BRK.A', 'BRK.B', 'BRK-A', 'BRK-B',  # Berkshire Hathaway (class A & B, multiple symbol formats)
+    # $600B-$1T
+    'TSM',    # Taiwan Semiconductor
+    'LLY',    # Eli Lilly
+    'JPM',    # JPMorgan Chase
+    'WMT',    # Walmart
+    'V',      # Visa
+    'ORCL',   # Oracle
+    # Borderline $500-600B (included for safety — mega-caps bounce around this threshold)
+    'XOM',    # Exxon Mobil
+    'MA',     # Mastercard
+    'UNH',    # UnitedHealth
+    'COST',   # Costco
+    'HD',     # Home Depot
+    'NFLX',   # Netflix (AI/streaming giant, borderline)
+    'PG',     # Procter & Gamble
+    'JNJ',    # Johnson & Johnson
+    'BAC',    # Bank of America
+    # Tech mega-caps the user will want on earnings radar
+    'AMD',    # Advanced Micro Devices
+    'CRM',    # Salesforce
+    'ADBE',   # Adobe
+    'QCOM',   # Qualcomm
+    'INTC',   # Intel
+    'CSCO',   # Cisco
+    'IBM',    # IBM
+}
+
 # === IN-MEMORY CACHE ===
 _quote_cache: Dict[str, Any] = {}
 _quote_cache_time: float = 0
@@ -536,8 +571,8 @@ async def fetch_finnhub_earnings(from_date: str, to_date: str) -> list:
             })
             if resp.status_code == 200:
                 data = resp.json()
-                tracked = {'NVDA','MSFT','AAPL','AMZN','META','TSLA','AMD','AVGO','GOOGL'}
-                filtered = [e for e in data.get('earningsCalendar', []) if e.get('symbol') in tracked]
+                # Filter to mega-cap ($600B+) companies — the earnings that actually move the market
+                filtered = [e for e in data.get('earningsCalendar', []) if e.get('symbol') in MEGA_CAP_EARNINGS_SYMBOLS]
                 _FINNHUB_EARN_CACHE[cache_key] = {'ts': now_ts, 'data': filtered}
                 return filtered
     except Exception as e:
