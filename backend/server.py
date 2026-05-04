@@ -2235,6 +2235,16 @@ async def admin_delete_user(user_id: str, user=Depends(get_admin_user)):
     return {'status': 'deleted', 'user_id': user_id}
 
 # === INCLUDE ROUTER & MIDDLEWARE ===
+@api_router.get("/admin/discord/status")
+async def get_discord_status(user=Depends(get_admin_user)):
+    """Return current Discord bot health for the admin dashboard."""
+    try:
+        import discord_bot as _discord_bot
+        return _discord_bot.STATE
+    except Exception as e:
+        return {'enabled': False, 'connected': False, 'last_error': str(e)}
+
+
 app.include_router(api_router)
 app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -2450,17 +2460,6 @@ async def api_support_page():
     return SUPPORT_HTML
 
 # === STARTUP ===
-# =====================
-# DISCORD BOT STATUS
-# =====================
-@api_router.get("/admin/discord/status")
-async def get_discord_status(user=Depends(get_admin_user)):
-    """Return current Discord bot health for the admin dashboard."""
-    try:
-        import discord_bot as _discord_bot
-        return _discord_bot.STATE
-    except Exception as e:
-        return {'enabled': False, 'connected': False, 'last_error': str(e)}
 
 
 @app.on_event("startup")
