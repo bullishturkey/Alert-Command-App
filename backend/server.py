@@ -586,6 +586,98 @@ async def fetch_finnhub_earnings(from_date: str, to_date: str) -> list:
 _FINNHUB_EARN_CACHE: Dict[str, Dict[str, Any]] = {}
 _FINNHUB_EARN_TTL = 1800
 
+# In-memory cache for yfinance recent earnings (1 hour TTL)
+_RECENT_EARN_CACHE: Dict[str, Any] = {'ts': 0, 'data': []}
+_RECENT_EARN_TTL = 3600
+
+
+def _fetch_recent_earnings_yf(days_back: int = 14) -> list:
+    """Fetch RECENTLY REPORTED earnings for mega-cap symbols using yfinance.
+    Finnhub's free-tier `/calendar/earnings` only returns future events — yfinance fills the gap.
+    Runs in thread pool (yfinance is sync)."""
+    import yfinance as _yf
+    import pandas as _pd
+    from datetime import datetime as _dt, timezone as _tz
+
+    cutoff = _dt.now(_tz.utc) - timedelta(days=days_back)
+    today = _dt.now(_tz.utc)
+    results = []
+
+    for sym in MEGA_CAP_EARNINGS_SYMBOLS:
+        try:
+            t = _yf.Ticker(sym)
+            ed = t.earnings_dates
+            if ed is None or ed.empty:
+                continue
+            # Index is tz-aware DatetimeIndex
+            for ts, row in ed.iterrows():
+                try:
+                    ts_utc = ts.tz_convert('UTC') if hasattr(ts, 'tz_convert') and ts.tz is not None else ts
+                    ts_naive = ts_utc.to_pydatetime().replace(tzinfo=_tz.utc) if ts_utc.tzinfo is None else ts_utc.to_pydatetime()
+                except Exception:
+                    continue
+                # Keep only events from [cutoff, today] that have actuals
+                if not (cutoff <= ts_naive <= today):
+                    continue
+                reported_eps = row.get('Reported EPS')
+                if _pd.isna(reported_eps):
+                    continue  # skip rows with no actuals yet
+                est = row.get('EPS Estimate')
+                results.append({
+                    'symbol': sym,
+                    'date': ts_naive.strftime('%Y-%m-%d'),
+                    'hour': '',
+                    'epsEstimate': float(est) if not _pd.isna(est) else None,
+                    'revenueEstimate': None,  # yfinance doesn't surface rev in this frame
+                    'epsActual': float(reported_eps),
+                    'revenueActual': None,
+                })
+        except Exception as e:
+            logger.debug(f"Recent earnings yf failed for {sym}: {e}")
+            continue
+    return results
+
+
+async def _fetch_recent_earnings(days_back: int = 14) -> list:
+    """Async wrapper with stale-while-revalidate:
+    - If cache is fresh (<1h): return immediately
+    - If cache is stale but exists: return stale + kick off background refresh
+    - If no cache yet (cold start): fetch synchronously (22s one-time)"""
+    now_ts = time.time()
+    age = now_ts - _RECENT_EARN_CACHE['ts']
+    has_cache = bool(_RECENT_EARN_CACHE.get('data'))
+
+    # Fresh — return instantly
+    if age < _RECENT_EARN_TTL and has_cache:
+        return _RECENT_EARN_CACHE['data']
+
+    loop = asyncio.get_event_loop()
+
+    async def _refresh():
+        try:
+            data = await loop.run_in_executor(_executor, _fetch_recent_earnings_yf, days_back)
+            _RECENT_EARN_CACHE['ts'] = time.time()
+            _RECENT_EARN_CACHE['data'] = data
+            logger.info(f"Recent earnings refreshed: {len(data)} rows cached for 1h")
+        except Exception as e:
+            logger.warning(f"Recent earnings background refresh failed: {e}")
+
+    # Stale but usable — serve stale, refresh in background
+    if has_cache:
+        asyncio.create_task(_refresh())
+        return _RECENT_EARN_CACHE['data']
+
+    # Cold start — must fetch synchronously so we have SOMETHING to return
+    try:
+        data = await loop.run_in_executor(_executor, _fetch_recent_earnings_yf, days_back)
+        _RECENT_EARN_CACHE['ts'] = now_ts
+        _RECENT_EARN_CACHE['data'] = data
+        return data
+    except Exception as e:
+        logger.warning(f"Recent earnings cold fetch failed: {e}")
+        return []
+
+
 # In-memory cache for economic calendar (TTL: 30 min)
 # Key: "YYYY-MM-DD_YYYY-MM-DD"  → { 'ts': epoch_seconds, 'data': [events] }
 _ECON_CAL_CACHE: Dict[str, Dict[str, Any]] = {}
@@ -797,18 +889,22 @@ async def get_preflight(user=Depends(get_current_user)):
     weekday = now.weekday()  # 0=Mon
     week_start = (now - timedelta(days=weekday)).strftime('%Y-%m-%d')
     week_end = (now + timedelta(days=(6 - weekday))).strftime('%Y-%m-%d')
-    end_date = (now + timedelta(days=30)).strftime('%Y-%m-%d')
+    end_date = (now + timedelta(days=60)).strftime('%Y-%m-%d')
+    # Earnings window: include the past 7 days so recently-reported earnings (e.g. MSFT, GOOG)
+    # aren't missed right after they report. Then look ahead 60 days for upcoming reports.
+    earn_from = (now - timedelta(days=7)).strftime('%Y-%m-%d')
 
-    # === Run all 3 Finnhub fetches + DB query in PARALLEL ===
+    # === Run all Finnhub fetches + DB query in PARALLEL ===
     econ_task = fetch_finnhub_economic_calendar(week_start, week_end) if FINNHUB_KEY else asyncio.sleep(0, result=[])
-    earn_task = fetch_finnhub_earnings(today_str, end_date)
+    earn_task = fetch_finnhub_earnings(earn_from, end_date)
+    recent_earn_task = _fetch_recent_earnings(days_back=14)  # yfinance — fills Finnhub's past-earnings gap
     news_task = fetch_finnhub_news()
     db_task = db.economic_events.find(
         {'date': {'$gte': today_str}}, {'_id': 0}
     ).sort('date', 1).to_list(20)
 
-    economic_events, earnings, finnhub_news, db_events = await asyncio.gather(
-        econ_task, earn_task, news_task, db_task,
+    economic_events, earnings, recent_earnings, finnhub_news, db_events = await asyncio.gather(
+        econ_task, earn_task, recent_earn_task, news_task, db_task,
         return_exceptions=False,
     )
 
@@ -825,9 +921,17 @@ async def get_preflight(user=Depends(get_current_user)):
     all_events = economic_events + (db_events or [])
     all_events.sort(key=lambda x: x.get('date', ''))
 
-    # Earnings list
+    # Earnings list — tag "reported" vs "upcoming" and sort so recent reports appear first,
+    # then upcoming in chronological order. Merge Finnhub (upcoming) + yfinance (recent past).
     earnings_list = []
-    for e in (earnings or []):
+    seen = set()  # dedupe by (symbol, date)
+
+    # 1. Recent past earnings from yfinance (with actuals)
+    for e in (recent_earnings or []):
+        key = (e.get('symbol', ''), e.get('date', ''))
+        if key in seen:
+            continue
+        seen.add(key)
         earnings_list.append({
             'symbol': e.get('symbol', ''),
             'date': e.get('date', ''),
@@ -836,7 +940,35 @@ async def get_preflight(user=Depends(get_current_user)):
             'revenueEstimate': e.get('revenueEstimate'),
             'epsActual': e.get('epsActual'),
             'revenueActual': e.get('revenueActual'),
+            'reported': True,
         })
+
+    # 2. Finnhub upcoming earnings
+    for e in (earnings or []):
+        event_date = e.get('date', '')
+        key = (e.get('symbol', ''), event_date)
+        if key in seen:
+            continue
+        seen.add(key)
+        has_actuals = e.get('epsActual') is not None or e.get('revenueActual') is not None
+        is_past = event_date and event_date < today_str
+        reported = has_actuals or is_past
+        earnings_list.append({
+            'symbol': e.get('symbol', ''),
+            'date': event_date,
+            'hour': e.get('hour', ''),
+            'epsEstimate': e.get('epsEstimate'),
+            'revenueEstimate': e.get('revenueEstimate'),
+            'epsActual': e.get('epsActual'),
+            'revenueActual': e.get('revenueActual'),
+            'reported': reported,
+        })
+    # Sort: recently-reported first (desc within past), then upcoming (asc within future)
+    earnings_list.sort(key=lambda x: (
+        0 if x['reported'] else 1,                  # reported rows first
+        -int(x['date'].replace('-', '')) if x['reported'] and x['date'] else 0,  # desc within reported
+        int(x['date'].replace('-', '')) if not x['reported'] and x['date'] else 0,  # asc within upcoming
+    ))
 
     # Breaking news (most recent Finnhub news)
     breaking = []

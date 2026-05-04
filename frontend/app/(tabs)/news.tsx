@@ -11,7 +11,7 @@ interface EconomicEvent {
   event: string; date: string; time_utc?: string; time?: string; impact: string; category: string;
   estimate: string; previous: string; actual?: string; description: string; sentiment?: string;
 }
-interface Earning { symbol: string; date: string; hour: string; epsEstimate: number | null; revenueEstimate: number | null; }
+interface Earning { symbol: string; date: string; hour: string; epsEstimate: number | null; revenueEstimate: number | null; epsActual?: number | null; revenueActual?: number | null; reported?: boolean; }
 interface NewsItem { id: string; headline: string; source: string; summary: string; sentiment: string; url: string; timestamp: string; }
 interface AISentiment {
   overall_sentiment: string;
@@ -406,20 +406,53 @@ export default function PreflightScreen() {
               )}
             </View>
 
-            {/* Earnings */}
+            {/* Earnings — mega-caps ($600B+), past 7 days + next 60 days */}
             <View style={st.section}>
-              <View style={st.secHead}><Ionicons name="bar-chart" size={16} color={colors.blue} /><Text style={st.secTitle}>Big Tech Earnings</Text></View>
-              {earnings.length === 0 ? <View style={st.emptyS}><Text style={st.emptySTxt}>No upcoming big tech earnings</Text></View> : (
-                earnings.map((e, i) => (
-                  <View key={i} style={st.earnCard}>
-                    <View style={st.earnLeft}><Text style={st.earnSym}>{e.symbol}</Text><Text style={st.earnDate}>{fmtDate(e.date)}</Text></View>
-                    <View style={st.earnRight}>
-                      <View style={st.earnRow}><Text style={st.earnLbl}>EPS Est</Text><Text style={st.earnVal}>{e.epsEstimate ? `$${e.epsEstimate.toFixed(2)}` : '-'}</Text></View>
-                      <View style={st.earnRow}><Text style={st.earnLbl}>Rev Est</Text><Text style={st.earnVal}>{fmtRev(e.revenueEstimate)}</Text></View>
+              <View style={st.secHead}><Ionicons name="bar-chart" size={16} color={colors.blue} /><Text style={st.secTitle}>Mega-Cap Earnings</Text></View>
+              {earnings.length === 0 ? <View style={st.emptyS}><Text style={st.emptySTxt}>No mega-cap earnings reports in the window</Text></View> : (
+                earnings.map((e, i) => {
+                  const beat = e.reported && e.epsActual != null && e.epsEstimate != null && e.epsActual > e.epsEstimate;
+                  const miss = e.reported && e.epsActual != null && e.epsEstimate != null && e.epsActual < e.epsEstimate;
+                  const beatColor = beat ? colors.green : miss ? colors.red : colors.textSecondary;
+                  return (
+                    <View key={i} style={[st.earnCard, e.reported && { opacity: 0.92, borderLeftWidth: 3, borderLeftColor: beat ? colors.green : miss ? colors.red : colors.textTertiary }]}>
+                      <View style={st.earnLeft}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={st.earnSym}>{e.symbol}</Text>
+                          {e.reported && (
+                            <View style={{ backgroundColor: beat ? colors.greenBg : miss ? colors.redBg : 'rgba(160,160,168,0.15)', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                              <Text style={{ color: beatColor, fontSize: 9, fontWeight: '700', letterSpacing: 0.3 }}>
+                                {beat ? 'BEAT' : miss ? 'MISS' : 'REPORTED'}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={st.earnDate}>{fmtDate(e.date)}</Text>
+                      </View>
+                      <View style={st.earnRight}>
+                        <View style={st.earnRow}>
+                          <Text style={st.earnLbl}>EPS {e.reported ? 'Act' : 'Est'}</Text>
+                          <Text style={[st.earnVal, e.reported && { color: beatColor }]}>
+                            {e.reported
+                              ? (e.epsActual != null ? `$${e.epsActual.toFixed(2)}` : '-')
+                              : (e.epsEstimate != null ? `$${e.epsEstimate.toFixed(2)}` : '-')}
+                          </Text>
+                        </View>
+                        <View style={st.earnRow}>
+                          <Text style={st.earnLbl}>Rev {e.reported ? 'Act' : 'Est'}</Text>
+                          <Text style={[st.earnVal, e.reported && { color: beatColor }]}>
+                            {e.reported ? fmtRev(e.revenueActual ?? null) : fmtRev(e.revenueEstimate)}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={[st.earnHour, { backgroundColor: e.hour === 'bmo' ? colors.yellowBg : colors.blueBg }]}>
+                        <Text style={[st.earnHourTxt, { color: e.hour === 'bmo' ? colors.yellow : colors.blue }]}>
+                          {e.hour === 'bmo' ? 'Pre-Mkt' : e.hour === 'amc' ? 'After-Hrs' : e.hour || '-'}
+                        </Text>
+                      </View>
                     </View>
-                    <View style={[st.earnHour, { backgroundColor: e.hour === 'bmo' ? colors.yellowBg : colors.blueBg }]}><Text style={[st.earnHourTxt, { color: e.hour === 'bmo' ? colors.yellow : colors.blue }]}>{e.hour === 'bmo' ? 'Pre-Mkt' : e.hour === 'amc' ? 'After-Hrs' : e.hour || '-'}</Text></View>
-                  </View>
-                ))
+                  );
+                })
               )}
             </View>
 
