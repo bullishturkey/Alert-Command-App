@@ -639,17 +639,17 @@ def _fetch_recent_earnings_yf(days_back: int = 14) -> list:
 
 
 async def _fetch_recent_earnings(days_back: int = 14) -> list:
-    """Async wrapper with stale-while-revalidate:
-    - If cache is fresh (<1h): return immediately
-    - If cache is stale but exists: return stale + kick off background refresh
-    - If no cache yet (cold start): fetch synchronously (22s one-time)"""
+    """Async wrapper — INSTANT response with stale-while-revalidate.
+    NEVER blocks the request: if cache is empty, returns [] and triggers background fill.
+    The Preflight endpoint never waits on yfinance scraping (22s+) on cold start."""
     now_ts = time.time()
     age = now_ts - _RECENT_EARN_CACHE['ts']
-    has_cache = bool(_RECENT_EARN_CACHE.get('data'))
+    cached = _RECENT_EARN_CACHE.get('data')
+    has_cache = bool(cached)
 
-    # Fresh — return instantly
+    # Fresh cache — return instantly
     if age < _RECENT_EARN_TTL and has_cache:
-        return _RECENT_EARN_CACHE['data']
+        return cached
 
     loop = asyncio.get_event_loop()
 
@@ -662,20 +662,11 @@ async def _fetch_recent_earnings(days_back: int = 14) -> list:
         except Exception as e:
             logger.warning(f"Recent earnings background refresh failed: {e}")
 
-    # Stale but usable — serve stale, refresh in background
-    if has_cache:
-        asyncio.create_task(_refresh())
-        return _RECENT_EARN_CACHE['data']
+    # Always refresh in the background — never block
+    asyncio.create_task(_refresh())
 
-    # Cold start — must fetch synchronously so we have SOMETHING to return
-    try:
-        data = await loop.run_in_executor(_executor, _fetch_recent_earnings_yf, days_back)
-        _RECENT_EARN_CACHE['ts'] = now_ts
-        _RECENT_EARN_CACHE['data'] = data
-        return data
-    except Exception as e:
-        logger.warning(f"Recent earnings cold fetch failed: {e}")
-        return []
+    # Return whatever we have (cached, possibly stale, OR empty list on cold start)
+    return cached or []
 
 
 # In-memory cache for economic calendar (TTL: 30 min)
@@ -2092,56 +2083,27 @@ async def get_ai_sentiment(user=Depends(get_current_user)):
         asyncio.create_task(_refresh_ai_sentiment_bg())
         return {**_ai_sentiment_cache, 'mode': 'live'}
 
-    # Expired or no cache — generate fresh with a lock so only one caller pays the cost
-    try:
-        async with _ai_sentiment_refresh_lock:
-            # Re-check after acquiring lock (another request may have just filled it)
-            now = _time.time()
-            if _ai_sentiment_cache and (now - _ai_sentiment_cache_time) < AI_SENTIMENT_CACHE_TTL:
-                return {**_ai_sentiment_cache, 'mode': 'live'}
-
-            result = await _generate_ai_sentiment()
-            if result.get('sentiment'):
-                _ai_sentiment_cache = result
-                _ai_sentiment_cache_time = _time.time()
-                logger.info(f"AI sentiment generated: {result['sentiment'].get('overall_sentiment', 'unknown')}")
-            return {**result, 'mode': 'live'}
-    except asyncio.TimeoutError:
-        logger.warning("AI sentiment: Claude call timed out after 20s")
-        if _ai_sentiment_cache:
-            return {**_ai_sentiment_cache, 'mode': 'live'}
+    # Expired or no cache — return a placeholder immediately and refresh in background.
+    # NEVER block the user-facing request on a 5-9s Claude call.
+    if not _ai_sentiment_cache:
+        # First call after server boot — fire off generation, return placeholder
+        asyncio.create_task(_refresh_ai_sentiment_bg())
         return {
             'mode': 'live',
-            'error': 'AI analysis timed out',
             'sentiment': {
                 'overall_sentiment': 'neutral',
                 'confidence': 0,
-                'summary': 'AI analysis is taking longer than usual. Please try again shortly.',
+                'summary': 'Market intelligence loading… refresh in a moment to see AI analysis.',
                 'key_drivers': [],
                 'ndx_outlook': '',
                 'risk_factors': [],
-                'trade_bias': ''
+                'trade_bias': '',
             },
-            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'pending': True,
         }
-    except Exception as e:
-        logger.error(f"AI sentiment error: {e}")
-        if _ai_sentiment_cache:
-            return {**_ai_sentiment_cache, 'mode': 'live'}
-        return {
-            'mode': 'live',
-            'error': str(e),
-            'sentiment': {
-                'overall_sentiment': 'neutral',
-                'confidence': 0,
-                'summary': 'AI analysis temporarily unavailable. Please try again shortly.',
-                'key_drivers': [],
-                'ndx_outlook': '',
-                'risk_factors': [],
-                'trade_bias': ''
-            },
-            'generated_at': datetime.now(timezone.utc).isoformat(),
-        }
+    # Stale-stale (>60min): refresh in bg, serve last known
+    asyncio.create_task(_refresh_ai_sentiment_bg())
+    return {**_ai_sentiment_cache, 'mode': 'live'}
 
 # =====================
 # ADMIN ENDPOINTS
@@ -2537,6 +2499,33 @@ async def startup():
         logger.info("Alerts seeded")
 
     logger.info("Alerts Command backend started successfully")
+
+    # === Pre-warm slow caches in background so first user request is instant ===
+    async def _prewarm():
+        try:
+            # 1. yfinance recent earnings (~22s scrape — populates _RECENT_EARN_CACHE)
+            asyncio.create_task(_fetch_recent_earnings(days_back=14))
+            # 2. AI sentiment cache for current market state (Claude call ~5-9s)
+            asyncio.create_task(_generate_ai_sentiment())
+            # 3. Finnhub econ calendar / earnings / news (cheap but warms HTTP pool)
+            try:
+                from datetime import datetime as _dt
+                today = _dt.now(timezone.utc)
+                ws = today.strftime('%Y-%m-%d')
+                we = (today + timedelta(days=6)).strftime('%Y-%m-%d')
+                ee = (today + timedelta(days=60)).strftime('%Y-%m-%d')
+                ef = (today - timedelta(days=7)).strftime('%Y-%m-%d')
+                if FINNHUB_KEY:
+                    asyncio.create_task(fetch_finnhub_economic_calendar(ws, we))
+                    asyncio.create_task(fetch_finnhub_earnings(ef, ee))
+                    asyncio.create_task(fetch_finnhub_news())
+            except Exception as e:
+                logger.warning(f"Pre-warm Finnhub kick-off failed: {e}")
+            logger.info("Pre-warm: slow caches kicked off in background")
+        except Exception as e:
+            logger.warning(f"Pre-warm failed: {e}")
+
+    asyncio.create_task(_prewarm())
 
     # === Start Discord bot (no-op if DISCORD_BOT_TOKEN not set) ===
     try:
