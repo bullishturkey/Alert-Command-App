@@ -324,17 +324,27 @@ MOCK_NEWS = [
 ]
 
 # === FINNHUB API HELPERS ===
+# Tiny in-memory quote cache — Finnhub free tier is 60 calls/min. 3s TTL means
+# even with 20 symbols polled every 5s, we hit Finnhub <4 times per symbol per minute.
+_QUOTE_CACHE: Dict[str, Dict[str, Any]] = {}
+_QUOTE_CACHE_TTL = 3.0  # seconds
+
 async def fetch_finnhub_quote(symbol: str) -> Optional[dict]:
     if not FINNHUB_KEY:
         return None
+    # Cache hit?
+    cached = _QUOTE_CACHE.get(symbol)
+    now_ts = time.time()
+    if cached and (now_ts - cached['ts']) < _QUOTE_CACHE_TTL:
+        return cached['data']
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get('https://finnhub.io/api/v1/quote', params={'symbol': symbol, 'token': FINNHUB_KEY})
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get('c', 0) > 0:
                     info = TRACKED_SYMBOLS.get(symbol, {'name': symbol, 'sector': ''})
-                    return {
+                    out = {
                         'symbol': symbol,
                         'name': info.get('name', symbol),
                         'sector': info.get('sector', ''),
@@ -349,8 +359,13 @@ async def fetch_finnhub_quote(symbol: str) -> Optional[dict]:
                         'sentiment': 'bullish' if data['c'] > data['pc'] else 'bearish',
                         'timestamp': datetime.now(timezone.utc).isoformat()
                     }
+                    _QUOTE_CACHE[symbol] = {'ts': now_ts, 'data': out}
+                    return out
     except Exception as e:
         logger.warning(f"Finnhub quote error for {symbol}: {e}")
+        # Serve last cached value on transient error
+        if cached:
+            return cached['data']
     return None
 
 async def fetch_finnhub_candles(symbol: str, resolution: str = 'D', count: int = 100) -> Optional[dict]:
@@ -1337,24 +1352,26 @@ async def remove_from_watchlist(body: dict = Body(...), user=Depends(get_current
 
 @api_router.get("/market/quote-multi")
 async def get_multi_quotes(symbols: str = "", user=Depends(get_optional_user)):
-    """Fetch quotes for a list of comma-separated symbols"""
+    """Fetch quotes for a list of comma-separated symbols — fully parallel."""
     if not symbols:
         return {'quotes': []}
     symbol_list = [s.strip().upper() for s in symbols.split(',') if s.strip()]
-    quotes = []
-    for sym in symbol_list:
-        if sym == 'NDX':
-            quote = await fetch_ndx_quote()
+
+    async def _one(sym: str):
+        try:
+            if sym == 'NDX':
+                quote = await fetch_ndx_quote()
+            else:
+                quote = await fetch_finnhub_quote(sym)
             if not quote:
                 quote = generate_mock_quote(sym)
-        else:
-            quote = await fetch_finnhub_quote(sym)
-            if not quote:
-                # Try to generate a basic quote for unknown symbols
-                quote = generate_mock_quote(sym)
+        except Exception:
+            quote = generate_mock_quote(sym)
         quote['sparkline'] = generate_mock_sparkline(sym)
-        quotes.append(quote)
-    return {'quotes': quotes}
+        return quote
+
+    quotes = await asyncio.gather(*[_one(s) for s in symbol_list], return_exceptions=False)
+    return {'quotes': list(quotes)}
 
 @api_router.put("/alerts/{alert_id}")
 async def update_alert(alert_id: str, body: dict = Body(...), user=Depends(get_admin_user)):
