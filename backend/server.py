@@ -1030,7 +1030,7 @@ async def add_economic_event(body: dict = Body(...), user=Depends(get_admin_user
 async def get_alerts(user=Depends(get_current_user)):
     """Get NDX trading alerts - only from webhook pipeline and admin. Requires auth."""
     alerts = await db.alerts.find(
-        {'source': {'$in': ['webhook', 'pipedream', 'tradingview', 'admin', 'signal']}},
+        {'source': {'$in': ['webhook', 'pipedream', 'tradingview', 'admin', 'signal', 'discord']}},
         {'_id': 0}
     ).sort('created_at', -1).to_list(100)
     return {'alerts': alerts}
