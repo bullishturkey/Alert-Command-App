@@ -13,6 +13,7 @@ export default function AdminScreen() {
   const [stats, setStats] = useState({ users: 0, alerts: 0, messages: 0 });
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [discord, setDiscord] = useState<any>(null);
 
   // Alert form
   const [alertTitle, setAlertTitle] = useState('');
@@ -23,12 +24,14 @@ export default function AdminScreen() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [statsData, usersData] = await Promise.all([
+      const [statsData, usersData, discordData] = await Promise.all([
         apiFetch('/api/admin/stats'),
         apiFetch('/api/admin/users'),
+        apiFetch('/api/admin/discord/status').catch(() => null),
       ]);
       setStats(statsData);
       setUsers(usersData.users || []);
+      setDiscord(discordData);
     } catch (e) {
       console.error('Admin fetch error:', e);
     } finally {
@@ -116,6 +119,30 @@ export default function AdminScreen() {
         <View style={styles.headerBackBtn} />
       </View>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Discord bot status card */}
+        {discord && (
+          <View style={styles.discordCard}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={[
+                styles.discordDot,
+                { backgroundColor: !discord.enabled ? '#404048' : discord.connected ? colors.green : colors.red },
+              ]} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.discordTitle}>
+                  Discord Bot {!discord.enabled ? '— Not Configured' : discord.connected ? '— Connected' : '— Disconnected'}
+                </Text>
+                <Text style={styles.discordMeta} numberOfLines={1}>
+                  {!discord.enabled
+                    ? 'Set DISCORD_BOT_TOKEN + DISCORD_ALERTS_CHANNEL_ID in backend env'
+                    : discord.connected
+                      ? `Forwarded: ${discord.total_forwarded || 0} · As ${discord.bot_username || '—'}`
+                      : `Last error: ${(discord.last_error || 'unknown').toString().slice(0, 60)}`}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Stats */}
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
@@ -230,4 +257,8 @@ const styles = StyleSheet.create({
   userEmail: { color: '#555', fontSize: 12, marginTop: 2 },
   adminBadge: { backgroundColor: colors.greenBg, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   adminBadgeText: { color: colors.green, fontSize: 11, fontWeight: '700' },
+  discordCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1C1C1E', borderRadius: 12, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: colors.border },
+  discordDot: { width: 10, height: 10, borderRadius: 5 },
+  discordTitle: { color: colors.textPrimary, fontSize: 14, fontWeight: '700', marginBottom: 2 },
+  discordMeta: { color: colors.textSecondary, fontSize: 11 },
 });

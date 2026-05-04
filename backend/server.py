@@ -2450,6 +2450,19 @@ async def api_support_page():
     return SUPPORT_HTML
 
 # === STARTUP ===
+# =====================
+# DISCORD BOT STATUS
+# =====================
+@api_router.get("/admin/discord/status")
+async def get_discord_status(user=Depends(get_admin_user)):
+    """Return current Discord bot health for the admin dashboard."""
+    try:
+        import discord_bot as _discord_bot
+        return _discord_bot.STATE
+    except Exception as e:
+        return {'enabled': False, 'connected': False, 'last_error': str(e)}
+
+
 @app.on_event("startup")
 async def startup():
     # === Create DB indexes (idempotent — fast if already exist) ===
@@ -2526,6 +2539,40 @@ async def startup():
 
     logger.info("Alerts Command backend started successfully")
 
+    # === Start Discord bot (no-op if DISCORD_BOT_TOKEN not set) ===
+    try:
+        import discord_bot as _discord_bot
+
+        async def _on_discord_message(parsed: dict):
+            """Callback: Discord message → app alert + push notification"""
+            alert = {
+                'id': str(uuid.uuid4()),
+                'title': parsed['title'],
+                'message': parsed['message'],
+                'type': 'signal',
+                'ticker': parsed.get('ticker') or 'NDX',
+                'severity': 'high',
+                'source': 'discord',
+                'price': parsed.get('price'),
+                'created_by': 'Alerts Command',
+                'created_at': datetime.now(timezone.utc).isoformat(),
+            }
+            await db.alerts.insert_one(alert)
+            # Push notification (same flow as webhook alerts)
+            try:
+                await send_push_notifications(alert['title'], alert['message'], alert['id'])
+            except Exception as _pe:
+                logger.warning(f"Push after Discord alert failed: {_pe}")
+
+        _discord_bot.start_bot(_on_discord_message)
+    except Exception as e:
+        logger.error(f"Discord bot startup error: {e}")
+
 @app.on_event("shutdown")
 async def shutdown():
+    try:
+        import discord_bot as _discord_bot
+        await _discord_bot.stop_bot()
+    except Exception:
+        pass
     mongo_client.close()
