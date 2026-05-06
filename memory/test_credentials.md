@@ -1,8 +1,9 @@
 # Test Credentials — Alerts Command
 
 ## Admin Account
-- **Email**: `admin@alertscommand.com`
-- **Password**: `AlertsAdmin2026`
+- **Email**: `gregrussell90@gmail.com`  
+- **Password**: `Liltony121@`
+- **Backup Email**: `admin@alertscommand.com` (same password)
 
 Password is now loaded from `ADMIN_PASSWORD` env var in `/app/backend/.env`.
 If `ADMIN_PASSWORD` is unset, admin seeding is skipped entirely.
