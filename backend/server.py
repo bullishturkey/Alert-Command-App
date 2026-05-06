@@ -2456,135 +2456,142 @@ async def api_support_page():
 
 @app.on_event("startup")
 async def startup():
-    # === Create DB indexes (idempotent — fast if already exist) ===
-    try:
-        await db.users.create_index("email", unique=True)
-        await db.alerts.create_index([("created_at", -1)])
-        await db.alerts.create_index("source")
-        await db.alerts.create_index("ticker")
-        await db.channels.create_index("slug", unique=True)
-        await db.watchlist.create_index("user_id")
-        await db.push_tokens.create_index("token", unique=True)
-        await db.messages.create_index([("channel_id", 1), ("created_at", -1)])
-        logger.info("DB indexes ensured")
-    except Exception as e:
-        logger.error(f"Index creation issue: {e}")
+    """Startup MUST return instantly so the /health probe works immediately.
+    All DB seeding + warm-up happens in background tasks."""
+    logger.info("Alerts Command backend startup: kicking off background init...")
 
-    # === Seed admin (only if ADMIN_PASSWORD env var is set) ===
-    admin_password = os.environ.get('ADMIN_PASSWORD', '')
-    admin_email = os.environ.get('ADMIN_EMAIL', 'admin@alertscommand.com')
-    if not admin_password:
-        logger.warning(
-            "ADMIN_PASSWORD not set — skipping admin seed. "
-            "Set ADMIN_PASSWORD in your environment / deployment secrets to enable."
-        )
-    else:
-        admin = await db.users.find_one({'email': admin_email})
-        if not admin:
-            await db.users.insert_one({
-                'id': str(uuid.uuid4()),
-                'email': admin_email,
-                'username': 'Admin',
-                'password_hash': hash_password(admin_password),
-                'is_admin': True,
-                'created_at': datetime.now(timezone.utc).isoformat()
-            })
-            logger.info(f"Admin user seeded: {admin_email}")
-        else:
-            # Rotate password if it changed (so updating the env var propagates)
-            await db.users.update_one(
-                {'email': admin_email},
-                {'$set': {
-                    'password_hash': hash_password(admin_password),
-                    'is_admin': True,
-                }}
-            )
-            logger.info(f"Admin password synced from env for {admin_email}")
-
-    # Seed channels
-    channel_defs = [
-        ('general', 'General Market Chat', 'Open discussion about markets'),
-        ('trade-alerts', 'Trade Alerts', 'Real-time trading alerts'),
-        ('trade-ideas', 'Trade Ideas', 'Share and discuss trade setups'),
-        ('macro-news', 'Macro News', 'Macro economic updates and analysis'),
-        ('admin-announcements', 'Admin Announcements', 'Official announcements'),
-    ]
-    for slug, name, desc in channel_defs:
-        existing = await db.channels.find_one({'slug': slug})
-        if not existing:
-            await db.channels.insert_one({'id': str(uuid.uuid4()), 'slug': slug, 'name': name, 'description': desc})
-
-    # Seed alerts
-    alert_count = await db.alerts.count_documents({})
-    if alert_count == 0:
-        now = datetime.now(timezone.utc)
-        seed_alerts = [
-            {'id': str(uuid.uuid4()), 'title': 'NDX ALERT: Bullish Divergence', 'message': 'Bullish divergence forming on RSI. Possible bounce from VWAP support.', 'type': 'bullish', 'ticker': 'NDX', 'severity': 'high', 'created_by': 'Admin', 'created_at': (now - timedelta(hours=2)).isoformat()},
-            {'id': str(uuid.uuid4()), 'title': 'NVDA: Breakout Watch', 'message': 'NVDA approaching key resistance at $148. Watch for volume confirmation.', 'type': 'bullish', 'ticker': 'NVDA', 'severity': 'medium', 'created_by': 'Admin', 'created_at': (now - timedelta(hours=5)).isoformat()},
-            {'id': str(uuid.uuid4()), 'title': 'TSLA: Support Test', 'message': 'Tesla testing 50-day moving average support. Bearish below $255.', 'type': 'bearish', 'ticker': 'TSLA', 'severity': 'medium', 'created_by': 'Admin', 'created_at': (now - timedelta(hours=8)).isoformat()},
-            {'id': str(uuid.uuid4()), 'title': 'Macro Alert: CPI Release Tomorrow', 'message': 'CPI data releasing tomorrow at 8:30 AM ET. Expect volatility.', 'type': 'info', 'ticker': '', 'severity': 'high', 'created_by': 'Admin', 'created_at': (now - timedelta(hours=12)).isoformat()},
-            {'id': str(uuid.uuid4()), 'title': 'QQQ: Key Level at $515', 'message': 'QQQ holding above $515 support. Bullish above, bearish breakdown below.', 'type': 'neutral', 'ticker': 'QQQ', 'severity': 'medium', 'created_by': 'Admin', 'created_at': (now - timedelta(hours=15)).isoformat()},
-        ]
-        await db.alerts.insert_many(seed_alerts)
-        logger.info("Alerts seeded")
-
-    logger.info("Alerts Command backend started successfully")
-
-    # === Pre-warm slow caches in background so first user request is instant ===
-    async def _prewarm():
+    async def _background_init():
+        # === Create DB indexes (idempotent — fast if already exist) ===
         try:
-            # 1. yfinance recent earnings (~22s scrape — populates _RECENT_EARN_CACHE)
-            asyncio.create_task(_fetch_recent_earnings(days_back=14))
-            # 2. AI sentiment cache for current market state (Claude call ~5-9s)
-            asyncio.create_task(_generate_ai_sentiment())
-            # 3. Finnhub econ calendar / earnings / news (cheap but warms HTTP pool)
+            await db.users.create_index("email", unique=True)
+            await db.alerts.create_index([("created_at", -1)])
+            await db.alerts.create_index("source")
+            await db.alerts.create_index("ticker")
+            await db.channels.create_index("slug", unique=True)
+            await db.watchlist.create_index("user_id")
+            await db.push_tokens.create_index("token", unique=True)
+            await db.messages.create_index([("channel_id", 1), ("created_at", -1)])
+            logger.info("DB indexes ensured")
+        except Exception as e:
+            logger.error(f"Index creation issue: {e}")
+
+        # === Seed admin (only if ADMIN_PASSWORD env var is set) ===
+        admin_password = os.environ.get('ADMIN_PASSWORD', '')
+        admin_email = os.environ.get('ADMIN_EMAIL', 'admin@alertscommand.com')
+        if not admin_password:
+            logger.warning(
+                "ADMIN_PASSWORD not set — skipping admin seed. "
+                "Set ADMIN_PASSWORD in your environment / deployment secrets to enable."
+            )
+        else:
             try:
-                from datetime import datetime as _dt
-                today = _dt.now(timezone.utc)
-                ws = today.strftime('%Y-%m-%d')
-                we = (today + timedelta(days=6)).strftime('%Y-%m-%d')
-                ee = (today + timedelta(days=60)).strftime('%Y-%m-%d')
-                ef = (today - timedelta(days=7)).strftime('%Y-%m-%d')
-                if FINNHUB_KEY:
-                    asyncio.create_task(fetch_finnhub_economic_calendar(ws, we))
-                    asyncio.create_task(fetch_finnhub_earnings(ef, ee))
-                    asyncio.create_task(fetch_finnhub_news())
+                admin = await db.users.find_one({'email': admin_email})
+                if not admin:
+                    await db.users.insert_one({
+                        'id': str(uuid.uuid4()),
+                        'email': admin_email,
+                        'username': 'Admin',
+                        'password_hash': hash_password(admin_password),
+                        'is_admin': True,
+                        'created_at': datetime.now(timezone.utc).isoformat()
+                    })
+                    logger.info(f"Admin user seeded: {admin_email}")
+                else:
+                    # Rotate password if it changed (so updating the env var propagates)
+                    await db.users.update_one(
+                        {'email': admin_email},
+                        {'$set': {
+                            'password_hash': hash_password(admin_password),
+                            'is_admin': True,
+                        }}
+                    )
+                    logger.info(f"Admin password synced from env for {admin_email}")
             except Exception as e:
-                logger.warning(f"Pre-warm Finnhub kick-off failed: {e}")
+                logger.error(f"Admin seed failed: {e}")
+
+        # Seed channels
+        try:
+            channel_defs = [
+                ('general', 'General Market Chat', 'Open discussion about markets'),
+                ('trade-alerts', 'Trade Alerts', 'Real-time trading alerts'),
+                ('trade-ideas', 'Trade Ideas', 'Share and discuss trade setups'),
+                ('macro-news', 'Macro News', 'Macro economic updates and analysis'),
+                ('admin-announcements', 'Admin Announcements', 'Official announcements'),
+            ]
+            for slug, name, desc in channel_defs:
+                existing = await db.channels.find_one({'slug': slug})
+                if not existing:
+                    await db.channels.insert_one({'id': str(uuid.uuid4()), 'slug': slug, 'name': name, 'description': desc})
+        except Exception as e:
+            logger.error(f"Channel seed failed: {e}")
+
+        # Seed alerts
+        try:
+            alert_count = await db.alerts.count_documents({})
+            if alert_count == 0:
+                now = datetime.now(timezone.utc)
+                seed_alerts = [
+                    {'id': str(uuid.uuid4()), 'title': 'NDX ALERT: Bullish Divergence', 'message': 'Bullish divergence forming on RSI. Possible bounce from VWAP support.', 'type': 'bullish', 'ticker': 'NDX', 'severity': 'high', 'created_by': 'Admin', 'created_at': (now - timedelta(hours=2)).isoformat()},
+                    {'id': str(uuid.uuid4()), 'title': 'NVDA: Breakout Watch', 'message': 'NVDA approaching key resistance at $148. Watch for volume confirmation.', 'type': 'bullish', 'ticker': 'NVDA', 'severity': 'medium', 'created_by': 'Admin', 'created_at': (now - timedelta(hours=5)).isoformat()},
+                    {'id': str(uuid.uuid4()), 'title': 'TSLA: Support Test', 'message': 'Tesla testing 50-day moving average support. Bearish below $255.', 'type': 'bearish', 'ticker': 'TSLA', 'severity': 'medium', 'created_by': 'Admin', 'created_at': (now - timedelta(hours=8)).isoformat()},
+                    {'id': str(uuid.uuid4()), 'title': 'Macro Alert: CPI Release Tomorrow', 'message': 'CPI data releasing tomorrow at 8:30 AM ET. Expect volatility.', 'type': 'info', 'ticker': '', 'severity': 'high', 'created_by': 'Admin', 'created_at': (now - timedelta(hours=12)).isoformat()},
+                    {'id': str(uuid.uuid4()), 'title': 'QQQ: Key Level at $515', 'message': 'QQQ holding above $515 support. Bullish above, bearish breakdown below.', 'type': 'neutral', 'ticker': 'QQQ', 'severity': 'medium', 'created_by': 'Admin', 'created_at': (now - timedelta(hours=15)).isoformat()},
+                ]
+                await db.alerts.insert_many(seed_alerts)
+                logger.info("Alerts seeded")
+        except Exception as e:
+            logger.error(f"Alert seed failed: {e}")
+
+        logger.info("Alerts Command backend init complete")
+
+        # === Pre-warm slow caches so first user request is instant ===
+        try:
+            asyncio.create_task(_fetch_recent_earnings(days_back=14))
+            asyncio.create_task(_generate_ai_sentiment())
+            from datetime import datetime as _dt
+            today = _dt.now(timezone.utc)
+            ws = today.strftime('%Y-%m-%d')
+            we = (today + timedelta(days=6)).strftime('%Y-%m-%d')
+            ee = (today + timedelta(days=60)).strftime('%Y-%m-%d')
+            ef = (today - timedelta(days=7)).strftime('%Y-%m-%d')
+            if FINNHUB_KEY:
+                asyncio.create_task(fetch_finnhub_economic_calendar(ws, we))
+                asyncio.create_task(fetch_finnhub_earnings(ef, ee))
+                asyncio.create_task(fetch_finnhub_news())
             logger.info("Pre-warm: slow caches kicked off in background")
         except Exception as e:
             logger.warning(f"Pre-warm failed: {e}")
 
-    asyncio.create_task(_prewarm())
+        # === Start Discord bot (no-op if DISCORD_BOT_TOKEN not set or DISCORD_BOT_ENABLED=false) ===
+        try:
+            import discord_bot as _discord_bot
 
-    # === Start Discord bot (no-op if DISCORD_BOT_TOKEN not set) ===
-    try:
-        import discord_bot as _discord_bot
+            async def _on_discord_message(parsed: dict):
+                """Callback: Discord message → app alert + push notification"""
+                alert = {
+                    'id': str(uuid.uuid4()),
+                    'title': parsed['title'],
+                    'message': parsed['message'],
+                    'type': 'signal',
+                    'ticker': parsed.get('ticker') or 'NDX',
+                    'severity': 'high',
+                    'source': 'discord',
+                    'price': parsed.get('price'),
+                    'created_by': 'Alerts Command',
+                    'created_at': datetime.now(timezone.utc).isoformat(),
+                }
+                await db.alerts.insert_one(alert)
+                try:
+                    await send_push_notifications(alert['title'], alert['message'], alert['id'])
+                except Exception as _pe:
+                    logger.warning(f"Push after Discord alert failed: {_pe}")
 
-        async def _on_discord_message(parsed: dict):
-            """Callback: Discord message → app alert + push notification"""
-            alert = {
-                'id': str(uuid.uuid4()),
-                'title': parsed['title'],
-                'message': parsed['message'],
-                'type': 'signal',
-                'ticker': parsed.get('ticker') or 'NDX',
-                'severity': 'high',
-                'source': 'discord',
-                'price': parsed.get('price'),
-                'created_by': 'Alerts Command',
-                'created_at': datetime.now(timezone.utc).isoformat(),
-            }
-            await db.alerts.insert_one(alert)
-            # Push notification (same flow as webhook alerts)
-            try:
-                await send_push_notifications(alert['title'], alert['message'], alert['id'])
-            except Exception as _pe:
-                logger.warning(f"Push after Discord alert failed: {_pe}")
+            _discord_bot.start_bot(_on_discord_message)
+        except Exception as e:
+            logger.error(f"Discord bot startup error: {e}")
 
-        _discord_bot.start_bot(_on_discord_message)
-    except Exception as e:
-        logger.error(f"Discord bot startup error: {e}")
+    # CRITICAL: don't await — let startup return immediately so /health probes work
+    asyncio.create_task(_background_init())
 
 @app.on_event("shutdown")
 async def shutdown():
