@@ -2,7 +2,7 @@
 
 ## Admin Account
 - **Email**: `gregrussell90@gmail.com`  
-- **Password**: `Liltony121@`
+- **Password**: `Liltony2026`
 - **Backup Email**: `admin@alertscommand.com` (same password)
 
 Password is now loaded from `ADMIN_PASSWORD` env var in `/app/backend/.env`.
