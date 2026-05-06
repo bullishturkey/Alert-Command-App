@@ -38,6 +38,19 @@ EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 # === APP SETUP ===
 app = FastAPI(title="Alerts Command API")
 api_router = APIRouter(prefix="/api")
+
+
+# === KUBERNETES HEALTH PROBES ===
+# Both `/health` and `/api/health` are kept lightweight and never touch DB or Discord state.
+# They MUST return instantly so nginx/k8s readiness probes don't kill the container.
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
+
+@app.get("/api/health")
+async def api_health_check():
+    return {"status": "ok"}
 mongo_client = AsyncIOMotorClient(mongo_url)
 db = mongo_client[db_name]
 _executor = ThreadPoolExecutor(max_workers=2)

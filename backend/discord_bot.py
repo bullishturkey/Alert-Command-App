@@ -175,6 +175,14 @@ def start_bot(on_message_callback: Callable[[dict], Awaitable[None]]):
     if not token or not channel_id_raw:
         logger.info("Discord bot disabled (DISCORD_BOT_TOKEN or DISCORD_ALERTS_CHANNEL_ID not set)")
         return
+    # Allow operators to opt-out in multi-replica production deployments — Discord enforces
+    # a single active gateway session per token, so multiple replicas cause endless reconnect
+    # storms ("Cannot write to closing transport"). Set DISCORD_BOT_ENABLED=false in prod env
+    # if you scale > 1 replica without leader election.
+    enabled_flag = os.environ.get('DISCORD_BOT_ENABLED', 'true').strip().lower()
+    if enabled_flag in ('false', '0', 'no', 'off'):
+        logger.info("Discord bot disabled by DISCORD_BOT_ENABLED env var")
+        return
     try:
         channel_id = int(channel_id_raw)
     except ValueError:
@@ -184,14 +192,27 @@ def start_bot(on_message_callback: Callable[[dict], Awaitable[None]]):
     STATE['enabled'] = True
 
     async def _supervisor():
-        # Reconnect loop — if the bot crashes, retry after a delay
+        # Reconnect loop with exponential backoff. Capped at 5 min to avoid log spam
+        # when Discord rejects (e.g. due to another replica holding the session).
+        consecutive_failures = 0
+        max_failures_before_giveup = 10
         while True:
             try:
                 await _start_client(token, channel_id, on_message_callback)
+                consecutive_failures = 0  # reset on clean run
             except Exception as e:
-                logger.error(f"Discord bot supervisor caught: {e}")
-            # Brief cooldown before reconnecting
-            await asyncio.sleep(10)
+                consecutive_failures += 1
+                logger.error(f"Discord bot supervisor caught (failure {consecutive_failures}): {e}")
+            # If we keep failing, this replica likely shouldn't be running the bot — back off hard
+            if consecutive_failures >= max_failures_before_giveup:
+                logger.error(f"Discord bot giving up after {consecutive_failures} consecutive failures. Set DISCORD_BOT_ENABLED=false to silence.")
+                STATE['last_error'] = "Repeatedly failing — likely another replica holds the session"
+                await asyncio.sleep(300)  # 5 min cooldown
+                consecutive_failures = 0  # try again later
+            else:
+                # Exponential backoff: 10s, 20s, 40s, 80s ... capped at 5 min
+                delay = min(10 * (2 ** (consecutive_failures - 1)), 300)
+                await asyncio.sleep(delay)
 
     _bot_task = asyncio.create_task(_supervisor())
 
