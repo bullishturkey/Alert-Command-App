@@ -5,3 +5,4 @@
  */
 export const TOKEN_KEY = 'ac_auth_token';
 export const GUEST_KEY = 'ac_guest_mode';
+export const SERVER_URL_KEY = 'ac_server_url'; // user-overrideable server URL

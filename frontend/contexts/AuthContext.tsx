@@ -1,8 +1,25 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { TOKEN_KEY, GUEST_KEY } from '../constants/auth';
+import { TOKEN_KEY, GUEST_KEY, SERVER_URL_KEY } from '../constants/auth';
 
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const DEFAULT_API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const TIMEOUT_MS = 10000; // 10-second hard timeout on all auth requests
+
+/** Returns AbortController + a promise that rejects after TIMEOUT_MS */
+function withTimeout(ms: number): AbortController {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller;
+}
+
+/** Returns the active API base URL (user override takes priority). */
+export async function getApiUrl(): Promise<string> {
+  try {
+    const override = await AsyncStorage.getItem(SERVER_URL_KEY);
+    if (override && override.trim()) return override.trim().replace(/\/$/, '');
+  } catch { /* ignore */ }
+  return DEFAULT_API_URL.replace(/\/$/, '');
+}
 
 interface User {
   id: string;
@@ -17,11 +34,13 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   isGuest: boolean;
+  serverUrl: string;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   continueAsGuest: () => void;
   deleteAccount: () => Promise<void>;
+  updateServerUrl: (url: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
@@ -31,6 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isGuest, setIsGuest] = useState(false);
+  const [serverUrl, setServerUrl] = useState(DEFAULT_API_URL);
 
   useEffect(() => {
     loadToken();
@@ -38,13 +58,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadToken = async () => {
     try {
+      const apiUrl = await getApiUrl();
+      setServerUrl(apiUrl);
       const saved = await AsyncStorage.getItem(TOKEN_KEY);
       const guestMode = await AsyncStorage.getItem(GUEST_KEY);
       if (saved) {
-        const resp = await fetch(`${API_URL}/api/auth/me`, {
+        const controller = withTimeout(TIMEOUT_MS);
+        const resp = await fetch(`${apiUrl}/api/auth/me`, {
           headers: { Authorization: `Bearer ${saved}` },
-        });
-        if (resp.ok) {
+          signal: controller.signal,
+        }).catch(() => null);
+        if (resp?.ok) {
           const data = await resp.json();
           setUser(data.user);
           setToken(saved);
@@ -63,15 +87,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const login = useCallback(async (email: string, password: string) => {
+    const apiUrl = await getApiUrl();
+    const controller = withTimeout(TIMEOUT_MS);
     let resp: Response;
     try {
-      resp = await fetch(`${API_URL}/api/auth/login`, {
+      resp = await fetch(`${apiUrl}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
+        signal: controller.signal,
       });
-    } catch {
-      throw new Error('Cannot reach server. Please check your connection or try again later.');
+    } catch (e: any) {
+      if (e?.name === 'AbortError') {
+        throw new Error('Server not responding. Check your internet or the server URL in Settings.');
+      }
+      throw new Error('Cannot reach server. Check your internet connection.');
     }
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ detail: 'Invalid email or password' }));
@@ -86,11 +116,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const register = useCallback(async (email: string, username: string, password: string) => {
-    const resp = await fetch(`${API_URL}/api/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, username, password }),
-    });
+    const apiUrl = await getApiUrl();
+    const controller = withTimeout(TIMEOUT_MS);
+    let resp: Response;
+    try {
+      resp = await fetch(`${apiUrl}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, username, password }),
+        signal: controller.signal,
+      });
+    } catch (e: any) {
+      if (e?.name === 'AbortError') throw new Error('Server not responding. Check server URL in Settings.');
+      throw new Error('Cannot reach server. Check your internet connection.');
+    }
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ detail: 'Registration failed' }));
       throw new Error(err.detail || 'Registration failed');
@@ -118,7 +157,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const deleteAccount = useCallback(async () => {
     if (!token) return;
-    const resp = await fetch(`${API_URL}/api/auth/account`, {
+    const apiUrl = await getApiUrl();
+    const resp = await fetch(`${apiUrl}/api/auth/account`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -133,8 +173,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsGuest(false);
   }, [token]);
 
+  const updateServerUrl = useCallback(async (url: string) => {
+    const clean = url.trim().replace(/\/$/, '');
+    if (clean) {
+      await AsyncStorage.setItem(SERVER_URL_KEY, clean);
+    } else {
+      await AsyncStorage.removeItem(SERVER_URL_KEY);
+    }
+    setServerUrl(clean || DEFAULT_API_URL);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, isGuest, login, register, logout, continueAsGuest, deleteAccount }}>
+    <AuthContext.Provider value={{ user, token, isLoading, isGuest, serverUrl, login, register, logout, continueAsGuest, deleteAccount, updateServerUrl }}>
       {children}
     </AuthContext.Provider>
   );

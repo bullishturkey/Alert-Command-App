@@ -1,10 +1,23 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { TOKEN_KEY } from '../constants/auth';
+import { TOKEN_KEY, SERVER_URL_KEY } from '../constants/auth';
 
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const DEFAULT_API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+
+async function getBaseUrl(): Promise<string> {
+  try {
+    const override = await AsyncStorage.getItem(SERVER_URL_KEY);
+    if (override && override.trim()) return override.trim().replace(/\/$/, '');
+  } catch { /* ignore */ }
+  return DEFAULT_API_URL.replace(/\/$/, '');
+}
+
+const TIMEOUT_MS = 15000; // 15-second timeout on all API calls
 
 export async function apiFetch(endpoint: string, options: RequestInit = {}) {
-  const token = await AsyncStorage.getItem(TOKEN_KEY);
+  const [token, baseUrl] = await Promise.all([
+    AsyncStorage.getItem(TOKEN_KEY),
+    getBaseUrl(),
+  ]);
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...((options.headers as Record<string, string>) || {}),
@@ -12,12 +25,21 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}) {
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
-  const resp = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
-  if (!resp.ok) {
-    const error = await resp.json().catch(() => ({ detail: 'Request failed' }));
-    throw new Error(error.detail || `Request failed: ${resp.status}`);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const resp = await fetch(`${baseUrl}${endpoint}`, { ...options, headers, signal: controller.signal });
+    if (!resp.ok) {
+      const error = await resp.json().catch(() => ({ detail: 'Request failed' }));
+      throw new Error(error.detail || `Request failed: ${resp.status}`);
+    }
+    return resp.json();
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw new Error('Server not responding. Check your connection.');
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return resp.json();
 }
 
 export function formatNumber(num: number): string {
