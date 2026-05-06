@@ -63,14 +63,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const login = useCallback(async (email: string, password: string) => {
-    const resp = await fetch(`${API_URL}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
+    let resp: Response;
+    try {
+      resp = await fetch(`${API_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+    } catch {
+      throw new Error('Cannot reach server. Please check your connection or try again later.');
+    }
     if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ detail: 'Login failed' }));
-      throw new Error(err.detail || 'Login failed');
+      const err = await resp.json().catch(() => ({ detail: 'Invalid email or password' }));
+      throw new Error(err.detail || 'Invalid email or password');
     }
     const data = await resp.json();
     await AsyncStorage.setItem(TOKEN_KEY, data.token);

@@ -102,9 +102,33 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Test the NDX Command Trading Intelligence Platform backend APIs including new AI sentiment, alert editing, and settings endpoints"
+user_problem_statement: "Build and maintain Alerts Command - a mobile-first trading intelligence platform. Latest work: Fixed login error messaging, imported 357 Discord historical alerts (2 years), added Discord history import to Admin panel, fixed delete alert functionality."
 
 backend:
+  - task: "Discord History Import - POST /api/admin/discord/import-history"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "✅ Implemented Discord REST API import. Fetches up to 2 years of messages from channel, parses via parse_message(), deduplicates by discord_message_id. Successfully imported 357 alerts in ~1 min. Runs as asyncio background task."
+
+  - task: "Discord Import Status - GET /api/admin/discord/import-status"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "✅ Returns current import progress: running, imported, skipped, total_fetched, status, timestamps."
+
   - task: "Auth Flow - Login API"
     implemented: true
     working: true

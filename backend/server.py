@@ -1051,7 +1051,7 @@ async def get_alerts(user=Depends(get_current_user)):
     alerts = await db.alerts.find(
         {'source': {'$in': ['webhook', 'pipedream', 'tradingview', 'admin', 'signal', 'discord']}},
         {'_id': 0}
-    ).sort('created_at', -1).to_list(100)
+    ).sort('created_at', -1).to_list(500)
     return {'alerts': alerts}
 
 @api_router.post("/alerts")
@@ -2235,6 +2235,172 @@ async def get_discord_status(user=Depends(get_admin_user)):
         return _discord_bot.STATE
     except Exception as e:
         return {'enabled': False, 'connected': False, 'last_error': str(e)}
+
+
+# === DISCORD HISTORY IMPORT ===
+DISCORD_EPOCH = 1420070400000
+DISCORD_API_UA = 'DiscordBot (https://github.com/Rapptz/discord.py, 2.3.2)'
+
+_discord_import_state: Dict[str, Any] = {
+    'running': False,
+    'imported': 0,
+    'skipped': 0,
+    'total_fetched': 0,
+    'error': None,
+    'started_at': None,
+    'completed_at': None,
+    'status': 'idle',  # idle | running | done | error
+}
+
+
+async def _fetch_discord_page(session, token: str, channel_id: str, before: Optional[str]) -> list:
+    """Fetch up to 100 messages before a given snowflake ID, with rate-limit retry."""
+    import aiohttp
+    url = f'https://discord.com/api/v10/channels/{channel_id}/messages?limit=100'
+    if before:
+        url += f'&before={before}'
+    headers = {'Authorization': f'Bot {token}', 'User-Agent': DISCORD_API_UA}
+    try:
+        async with session.get(url, headers=headers) as resp:
+            if resp.status == 429:
+                data = await resp.json()
+                await asyncio.sleep(float(data.get('retry_after', 1)) + 0.1)
+                return await _fetch_discord_page(session, token, channel_id, before)
+            if resp.status != 200:
+                text = await resp.text()
+                logger.warning(f"Discord API {resp.status}: {text[:200]}")
+                return []
+            return await resp.json()
+    except Exception as e:
+        logger.error(f"Discord page fetch error: {e}")
+        return []
+
+
+async def _run_discord_import(token: str, channel_id: str, years_back: int = 2):
+    """Background task: import all Discord messages from past N years into alerts collection."""
+    global _discord_import_state
+    import aiohttp
+    from discord_bot import parse_message as _parse_msg
+
+    _discord_import_state.update({
+        'running': True, 'status': 'running', 'imported': 0,
+        'skipped': 0, 'total_fetched': 0, 'error': None,
+        'started_at': datetime.now(timezone.utc).isoformat(), 'completed_at': None,
+    })
+
+    cutoff_ms = int((datetime.now(timezone.utc) - timedelta(days=365 * years_back)).timestamp() * 1000)
+    cutoff_snowflake = (cutoff_ms - DISCORD_EPOCH) << 22
+
+    imported = skipped = total_fetched = 0
+    before = None
+    reached_cutoff = False
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            while not reached_cutoff:
+                messages = await _fetch_discord_page(session, token, channel_id, before)
+                if not messages:
+                    break
+
+                total_fetched += len(messages)
+                _discord_import_state['total_fetched'] = total_fetched
+
+                for msg in messages:
+                    msg_id = msg.get('id', '')
+                    try:
+                        msg_id_int = int(msg_id)
+                    except ValueError:
+                        msg_id_int = 0
+
+                    # Stop once we pass the 2-year cutoff
+                    if msg_id_int and msg_id_int < cutoff_snowflake:
+                        reached_cutoff = True
+                        break
+
+                    # Build text from content + embeds
+                    parts = []
+                    if msg.get('content'):
+                        parts.append(msg['content'])
+                    for emb in (msg.get('embeds') or []):
+                        if emb.get('title'): parts.append(str(emb['title']))
+                        if emb.get('description'): parts.append(str(emb['description']))
+                        for f in (emb.get('fields') or []):
+                            if f.get('name'): parts.append(str(f['name']))
+                            if f.get('value'): parts.append(str(f['value']))
+                    text = '\n'.join(p for p in parts if p).strip()
+
+                    if not text:
+                        skipped += 1
+                        continue
+
+                    # Dedup by Discord message ID
+                    if await db.alerts.find_one({'discord_message_id': msg_id}):
+                        skipped += 1
+                        continue
+
+                    parsed = _parse_msg(text)
+                    ts_ms = (msg_id_int >> 22) + DISCORD_EPOCH if msg_id_int else 0
+                    created_at = (
+                        datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).isoformat()
+                        if ts_ms else datetime.now(timezone.utc).isoformat()
+                    )
+                    alert_doc = {
+                        'id': str(uuid.uuid4()),
+                        'title': parsed['title'],
+                        'message': text,
+                        'type': 'info',
+                        'ticker': parsed.get('ticker', 'NDX'),
+                        'price': parsed.get('price'),
+                        'severity': 'medium',
+                        'source': 'discord',
+                        'created_by': msg.get('author', {}).get('username', 'Discord'),
+                        'created_at': created_at,
+                        'discord_message_id': msg_id,
+                    }
+                    await db.alerts.insert_one(alert_doc)
+                    imported += 1
+
+                _discord_import_state['imported'] = imported
+                _discord_import_state['skipped'] = skipped
+
+                if not messages:
+                    break
+                before = messages[-1]['id']
+                await asyncio.sleep(0.3)  # gentle rate limiting
+
+        _discord_import_state.update({
+            'status': 'done', 'imported': imported, 'skipped': skipped,
+            'completed_at': datetime.now(timezone.utc).isoformat(),
+        })
+        logger.info(f"Discord import complete: {imported} imported, {skipped} skipped")
+
+    except Exception as e:
+        _discord_import_state.update({'status': 'error', 'error': str(e)})
+        logger.error(f"Discord history import failed: {e}")
+    finally:
+        _discord_import_state['running'] = False
+
+
+@api_router.post("/admin/discord/import-history")
+async def start_discord_import(user=Depends(get_admin_user)):
+    """Start importing Discord channel history (last 2 years) as alerts. Runs in background."""
+    global _discord_import_state
+    if _discord_import_state.get('running'):
+        return {'status': 'already_running', **_discord_import_state}
+
+    token = os.environ.get('DISCORD_BOT_TOKEN', '').strip()
+    channel_id = os.environ.get('DISCORD_ALERTS_CHANNEL_ID', '').strip()
+    if not token or not channel_id:
+        raise HTTPException(400, detail='DISCORD_BOT_TOKEN or DISCORD_ALERTS_CHANNEL_ID not configured')
+
+    asyncio.create_task(_run_discord_import(token, channel_id, years_back=2))
+    return {'status': 'started'}
+
+
+@api_router.get("/admin/discord/import-status")
+async def get_discord_import_status(user=Depends(get_admin_user)):
+    """Return current Discord history import progress."""
+    return _discord_import_state
 
 
 app.include_router(api_router)

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -14,6 +14,9 @@ export default function AdminScreen() {
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [discord, setDiscord] = useState<any>(null);
+  const [importStatus, setImportStatus] = useState<any>(null);
+  const [importing, setImporting] = useState(false);
+  const importPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Alert form
   const [alertTitle, setAlertTitle] = useState('');
@@ -24,20 +27,55 @@ export default function AdminScreen() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [statsData, usersData, discordData] = await Promise.all([
+      const [statsData, usersData, discordData, importData] = await Promise.all([
         apiFetch('/api/admin/stats'),
         apiFetch('/api/admin/users'),
         apiFetch('/api/admin/discord/status').catch(() => null),
+        apiFetch('/api/admin/discord/import-status').catch(() => null),
       ]);
       setStats(statsData);
       setUsers(usersData.users || []);
       setDiscord(discordData);
+      if (importData) setImportStatus(importData);
     } catch (e) {
       console.error('Admin fetch error:', e);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const startImport = async () => {
+    Alert.alert(
+      'Import Discord History',
+      'This will import all alerts from the past 2 years from your Discord channel. This may take a few minutes. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Import', onPress: async () => {
+            setImporting(true);
+            try {
+              await apiFetch('/api/admin/discord/import-history', { method: 'POST' });
+              // Poll for progress every 3s
+              importPollRef.current = setInterval(async () => {
+                try {
+                  const status = await apiFetch('/api/admin/discord/import-status');
+                  setImportStatus(status);
+                  if (!status.running) {
+                    clearInterval(importPollRef.current!);
+                    setImporting(false);
+                    fetchData(); // refresh stats
+                  }
+                } catch { /* ignore */ }
+              }, 3000);
+            } catch (e: any) {
+              Alert.alert('Error', e.message);
+              setImporting(false);
+            }
+          }
+        }
+      ]
+    );
+  };
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -142,6 +180,36 @@ export default function AdminScreen() {
             </View>
           </View>
         )}
+
+        {/* Discord History Import */}
+        <View style={styles.importCard}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 8 }}>
+            <Ionicons name="cloud-download-outline" size={18} color={colors.green} />
+            <Text style={styles.sectionTitle}>Import Discord History</Text>
+          </View>
+          {importStatus && importStatus.status !== 'idle' && (
+            <View style={styles.importStatus}>
+              <Text style={[styles.importStatusLabel, { color: importStatus.status === 'error' ? colors.red : importStatus.status === 'done' ? colors.green : '#FFD60A' }]}>
+                {importStatus.status === 'running' ? `Importing… ${importStatus.imported} alerts imported` :
+                 importStatus.status === 'done' ? `Done! ${importStatus.imported} alerts imported, ${importStatus.skipped} skipped` :
+                 importStatus.status === 'error' ? `Error: ${importStatus.error?.slice(0, 80)}` : ''}
+              </Text>
+              {importStatus.status === 'running' && (
+                <Text style={styles.importSubLabel}>Fetched {importStatus.total_fetched} messages so far…</Text>
+              )}
+            </View>
+          )}
+          <TouchableOpacity
+            style={[styles.importBtn, importing && { opacity: 0.6 }]}
+            onPress={startImport}
+            disabled={importing}
+          >
+            {importing
+              ? <ActivityIndicator color="#000" size="small" />
+              : <Text style={styles.importBtnText}>Import Last 2 Years from Discord</Text>
+            }
+          </TouchableOpacity>
+        </View>
 
         {/* Stats */}
         <View style={styles.statsRow}>
@@ -261,4 +329,10 @@ const styles = StyleSheet.create({
   discordDot: { width: 10, height: 10, borderRadius: 5 },
   discordTitle: { color: colors.textPrimary, fontSize: 14, fontWeight: '700', marginBottom: 2 },
   discordMeta: { color: colors.textSecondary, fontSize: 11 },
+  importCard: { backgroundColor: '#1C1C1E', borderRadius: 14, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: colors.border },
+  importBtn: { backgroundColor: colors.green, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+  importBtnText: { color: '#000', fontSize: 15, fontWeight: '700' },
+  importStatus: { backgroundColor: '#000', borderRadius: 8, padding: 10, marginBottom: 12 },
+  importStatusLabel: { fontSize: 13, fontWeight: '600' },
+  importSubLabel: { color: '#888', fontSize: 11, marginTop: 4 },
 });
