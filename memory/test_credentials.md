@@ -2,7 +2,7 @@
 
 ## Admin Account
 - **Email**: `admin@alertscommand.com`
-- **Password**: `iC_T3UTrwO-Ym1eBwMvdDrlU`
+- **Password**: `AlertsAdmin2026`
 
 Password is now loaded from `ADMIN_PASSWORD` env var in `/app/backend/.env`.
 If `ADMIN_PASSWORD` is unset, admin seeding is skipped entirely.

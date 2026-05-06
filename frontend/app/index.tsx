@@ -113,7 +113,7 @@ export default function AuthScreen() {
               <Text style={styles.label}>Password</Text>
               <View style={styles.inputRow}>
                 <Ionicons name="lock-closed-outline" size={18} color={colors.textTertiary} style={styles.inputIcon} />
-                <TextInput testID="auth-password-input" style={styles.input} placeholder="Your password" placeholderTextColor={colors.textMuted} value={password} onChangeText={setPassword} secureTextEntry={!showPassword} />
+                <TextInput testID="auth-password-input" style={styles.input} placeholder="Your password" placeholderTextColor={colors.textMuted} value={password} onChangeText={setPassword} secureTextEntry={!showPassword} autoCapitalize="none" autoCorrect={false} spellCheck={false} />
                 <TouchableOpacity testID="auth-toggle-password" onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
                   <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={18} color={colors.textTertiary} />
                 </TouchableOpacity>
