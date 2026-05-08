@@ -1,14 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Platform, Dimensions, Modal, FlatList, TextInput } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { apiFetch, formatPrice, formatNumber, getChartHTML } from '../../utils/api';
-import { colors, spacing, radius } from '../../theme';
+import React from 'react';
+import { View } from 'react-native';
 
-let WebView: any = null;
-if (Platform.OS !== 'web') { WebView = require('react-native-webview').WebView; }
-let LWC: any = null;
-if (Platform.OS === 'web') { LWC = require('lightweight-charts'); }
+// Charts tab disabled — hidden from navigation and stubbed to prevent
+// WebView / lightweight-charts from loading into the JS bundle.
+export default function ChartsScreen() {
+  return <View />;
+}
 
 const { width: SW, height: SH } = Dimensions.get('window');
 const CHART_H = Math.round(SH * 0.46);
