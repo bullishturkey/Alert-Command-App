@@ -19,6 +19,37 @@ import discord
 
 logger = logging.getLogger("server")
 
+# --- Emoji → alert type detection ---
+# These sets map common Discord emoji to bullish (green) or bearish (red)
+_BULLISH_EMOJIS = {
+    '🟢', '✅', '📈', '⬆️', '🚀', '💚', '🔝', '🏆', '💰', '🤑', '✔', '🎯',
+    '🟩', '▲', '↑', '🔼', '💹', '👍', '🌙', '⭐', '🌟', '💫',
+}
+_BEARISH_EMOJIS = {
+    '🔴', '❌', '📉', '⬇️', '💔', '🛑', '⛔', '📛', '🟥', '▼', '↓',
+    '🔽', '🚨', '⚠️', '👎', '💀', '☠️', '🩸', '🆘',
+}
+
+
+def _detect_alert_type(text: str) -> str:
+    """Scan Discord message for colour emojis — bullish (green) wins over bearish (red).
+    Falls back to 'signal' (rendered green) if no emoji found."""
+    found_bearish = False
+    for ch in text:
+        if ch in _BULLISH_EMOJIS:
+            return 'bullish'
+        if ch in _BEARISH_EMOJIS:
+            found_bearish = True
+    # Check multi-char emoji sequences (e.g. ⬆️ is two codepoints)
+    for emoji in _BULLISH_EMOJIS:
+        if emoji in text:
+            return 'bullish'
+    for emoji in _BEARISH_EMOJIS:
+        if emoji in text:
+            found_bearish = True
+    return 'bearish' if found_bearish else 'signal'
+
+
 # Global state — exposed via /api/admin/discord/status
 STATE = {
     'enabled': False,
@@ -89,6 +120,7 @@ def parse_message(text: str) -> dict:
         'message': t,
         'ticker': ticker or 'NDX',
         'price': price,
+        'type': _detect_alert_type(t),
     }
 
 

@@ -2756,7 +2756,7 @@ async def startup():
                     'id': str(uuid.uuid4()),
                     'title': parsed['title'],
                     'message': parsed['message'],
-                    'type': 'signal',
+                    'type': parsed.get('type', 'signal'),
                     'ticker': parsed.get('ticker') or 'NDX',
                     'severity': 'high',
                     'source': 'discord',
