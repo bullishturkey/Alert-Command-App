@@ -385,16 +385,3 @@ const styles = StyleSheet.create({
   modalAddBtn: { flex: 1, paddingVertical: 14, borderRadius: radius.md, backgroundColor: colors.green, alignItems: 'center' },
   modalAddText: { color: '#000', fontSize: 15, fontWeight: '700' },
 });
-
-interface Quote {
-  symbol: string;
-  name: string;
-  price: number;
-  change: number;
-  changePercent: number;
-  volume: number;
-  sentiment: string;
-  high: number;
-  low: number;
-  open: number;
-  previousClose: number;
