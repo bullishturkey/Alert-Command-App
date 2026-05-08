@@ -1,19 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Platform, Dimensions } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { apiFetch, formatPrice, formatNumber, getChartHTML } from '../../utils/api';
-import { colors, spacing, radius } from '../../theme';
+import React from 'react';
+import { View } from 'react-native';
 
-let WebView: any = null;
-if (Platform.OS !== 'web') {
-  WebView = require('react-native-webview').WebView;
-}
-
-let LWC: any = null;
-if (Platform.OS === 'web') {
-  LWC = require('lightweight-charts');
+// Stock detail / chart page disabled — WebView and lightweight-charts removed
+// to reduce bundle size and memory footprint.
+export default function StockDetailScreen() {
+  return <View />;
 }
 
 const DETAIL_CHART_HEIGHT = 300;
