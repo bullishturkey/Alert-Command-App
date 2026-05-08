@@ -1408,8 +1408,7 @@ async def update_alert(alert_id: str, body: dict = Body(...), user=Depends(get_a
     result = await db.alerts.update_one({'id': alert_id}, {'$set': update_fields})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail='Alert not found')
-    updated = await db.alerts.find_one({'id': alert_id}, {'_id': 0})
-    return updated
+    return {'success': True, 'id': alert_id, **update_fields}
 
 # =====================
 # AI SENTIMENT ANALYSIS
@@ -2139,6 +2138,66 @@ async def get_ai_sentiment(user=Depends(get_current_user)):
 # =====================
 # ADMIN ENDPOINTS
 # =====================
+
+@api_router.post("/admin/refresh-sentiment")
+async def admin_force_refresh_sentiment(user=Depends(get_admin_user)):
+    """Admin: Force-regenerate AI sentiment immediately, bypassing cache TTL.
+    The new result is stored server-side and all users receive it on next request."""
+    global _ai_sentiment_cache, _ai_sentiment_cache_time, _ai_sentiment_refreshing
+    import time as _time
+    if _ai_sentiment_refreshing:
+        return {'status': 'already_refreshing', 'message': 'AI refresh already in progress. Check back in ~30 seconds.'}
+    _ai_sentiment_refreshing = True
+    try:
+        result = await _generate_ai_sentiment()
+        _ai_sentiment_cache = result
+        _ai_sentiment_cache_time = _time.time()
+        logger.info(f"Admin force-refresh AI sentiment by {user['username']}")
+        return {'status': 'success', 'message': 'AI sentiment refreshed and pushed to all users.', 'generated_at': datetime.now(timezone.utc).isoformat()}
+    except Exception as e:
+        logger.error(f"Admin force-refresh AI sentiment failed: {e}")
+        raise HTTPException(status_code=500, detail=f'AI refresh failed: {str(e)}')
+    finally:
+        _ai_sentiment_refreshing = False
+
+
+@api_router.post("/admin/reclassify-alerts")
+async def admin_reclassify_alerts(user=Depends(get_admin_user)):
+    """Admin: Re-run emoji detection on ALL alerts in the DB and update their type.
+    Fixes historical imported alerts that were saved as 'signal' before emoji detection existed."""
+    _BULLISH = {
+        '🟢','✅','📈','⬆️','🚀','💚','🔝','🏆','💰','🤑','✔','🎯','🟩','▲','↑','🔼','💹','👍','🌙','⭐','🌟','💫',
+    }
+    _BEARISH = {
+        '🔴','❌','📉','⬇️','💔','🛑','⛔','📛','🟥','▼','↓','🔽','🚨','⚠️','👎','💀','☠️','🩸','🆘',
+    }
+
+    def detect(text: str) -> str:
+        if not text:
+            return 'signal'
+        found_bearish = False
+        for emoji in _BULLISH:
+            if emoji in text:
+                return 'bullish'
+        for emoji in _BEARISH:
+            if emoji in text:
+                found_bearish = True
+        return 'bearish' if found_bearish else 'signal'
+
+    alerts = await db.alerts.find({}, {'_id': 0, 'id': 1, 'message': 1, 'title': 1, 'type': 1}).to_list(None)
+    updated = 0
+    for alert in alerts:
+        text = f"{alert.get('title','')} {alert.get('message','')}"
+        new_type = detect(text)
+        if new_type != alert.get('type'):
+            await db.alerts.update_one({'id': alert['id']}, {'$set': {'type': new_type}})
+            updated += 1
+
+    logger.info(f"Admin reclassify-alerts: {updated}/{len(alerts)} alerts updated by {user['username']}")
+    return {'status': 'success', 'total': len(alerts), 'updated': updated,
+            'message': f'Re-classified {updated} of {len(alerts)} alerts based on emoji detection.'}
+
+
 @api_router.post("/admin/broadcast")
 async def broadcast_alert(data: AlertCreate, user=Depends(get_admin_user)):
     alert = {

@@ -77,6 +77,46 @@ export default function AdminScreen() {
     );
   };
 
+  const [reclassifying, setReclassifying] = useState(false);
+  const [refreshingAI, setRefreshingAI] = useState(false);
+
+  const reclassifyAlerts = async () => {
+    Alert.alert(
+      'Re-classify Alert Colors',
+      'This will re-scan all alerts for green/red emojis and update their WIN/LOSS color. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Re-classify', onPress: async () => {
+          setReclassifying(true);
+          try {
+            const res = await apiFetch('/api/admin/reclassify-alerts', { method: 'POST' });
+            Alert.alert('Done', res.message || `Updated ${res.updated} alerts.`);
+            fetchData();
+          } catch (e: any) { Alert.alert('Error', e.message); }
+          finally { setReclassifying(false); }
+        }}
+      ]
+    );
+  };
+
+  const forceRefreshAI = async () => {
+    Alert.alert(
+      'Force Refresh AI Sentiment',
+      'This will generate fresh AI market analysis now (takes ~20s). All users will receive the updated analysis. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Refresh', onPress: async () => {
+          setRefreshingAI(true);
+          try {
+            const res = await apiFetch('/api/admin/refresh-sentiment', { method: 'POST' });
+            Alert.alert('Done', res.message || 'AI sentiment refreshed.');
+          } catch (e: any) { Alert.alert('Error', e.message); }
+          finally { setRefreshingAI(false); }
+        }}
+      ]
+    );
+  };
+
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const sendAlert = async () => {
@@ -211,6 +251,36 @@ export default function AdminScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Re-classify alert colors + Force AI refresh */}
+        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+          <TouchableOpacity
+            style={[styles.toolBtn, { flex: 1, borderColor: '#FFD60A', backgroundColor: 'rgba(255,214,10,0.08)' }, reclassifying && { opacity: 0.6 }]}
+            onPress={reclassifyAlerts}
+            disabled={reclassifying}
+          >
+            {reclassifying
+              ? <ActivityIndicator color="#FFD60A" size="small" />
+              : <>
+                  <Ionicons name="color-palette-outline" size={16} color="#FFD60A" />
+                  <Text style={[styles.toolBtnTxt, { color: '#FFD60A' }]}>Re-classify{'\n'}Alert Colors</Text>
+                </>
+            }
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toolBtn, { flex: 1, borderColor: colors.blue, backgroundColor: colors.blueBg }, refreshingAI && { opacity: 0.6 }]}
+            onPress={forceRefreshAI}
+            disabled={refreshingAI}
+          >
+            {refreshingAI
+              ? <ActivityIndicator color={colors.blue} size="small" />
+              : <>
+                  <Ionicons name="sparkles-outline" size={16} color={colors.blue} />
+                  <Text style={[styles.toolBtnTxt, { color: colors.blue }]}>Force Refresh{'\n'}AI Sentiment</Text>
+                </>
+            }
+          </TouchableOpacity>
+        </View>
+
         {/* Stats */}
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
@@ -307,6 +377,8 @@ const styles = StyleSheet.create({
   typeTextActive: { color: '#000' },
   sendAlertBtn: { backgroundColor: colors.green, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   sendAlertBtnDisabled: { opacity: 0.6 },
+  toolBtn: { borderRadius: 12, paddingVertical: 14, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, minHeight: 70 },
+  toolBtnTxt: { fontSize: 11, fontWeight: '700', textAlign: 'center', letterSpacing: 0.3 },
   sendAlertBtnText: { color: '#000', fontSize: 16, fontWeight: '700' },
   userCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1C1C1E', borderRadius: 12, padding: 14, marginBottom: 8, gap: 10 },
   userInfo: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 },

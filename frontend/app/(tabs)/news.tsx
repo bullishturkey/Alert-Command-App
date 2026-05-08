@@ -92,7 +92,8 @@ export default function PreflightScreen() {
   const [dailyRecap, setDailyRecap] = useState<any>(null);
   const [ndxPrice, setNdxPrice] = useState<number | null>(null);
   const [ndxChange, setNdxChange] = useState<number | null>(null);
-  const { isGuest } = useAuth();
+  const { user, isGuest } = useAuth();
+  const isAdmin = user?.is_admin === true;
 
   const fetchData = useCallback(async () => {
     try { const d = await apiFetch('/api/preflight'); setEvents(d.economic_events || []); setEarnings(d.earnings || []); setNews(d.breaking_news || []); }
@@ -150,7 +151,7 @@ export default function PreflightScreen() {
   return (
     <SafeAreaView style={st.safe} edges={['top']}>
       <FlatList data={[1]} keyExtractor={() => 'pf'}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); fetchAISentiment(); }} tintColor={colors.green} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={colors.green} />}
         showsVerticalScrollIndicator={false}
         renderItem={() => (
           <View style={st.content}>
@@ -324,10 +325,12 @@ export default function PreflightScreen() {
                         </View>
                       ) : null}
 
-                      <TouchableOpacity style={st.aiRefreshBtn} onPress={fetchAISentiment}>
-                        <Ionicons name="refresh" size={12} color={colors.textMuted} />
-                        <Text style={st.aiRefreshTxt}>Refresh Analysis</Text>
-                      </TouchableOpacity>
+                      {isAdmin && (
+                        <TouchableOpacity style={st.aiRefreshBtn} onPress={fetchAISentiment}>
+                          <Ionicons name="refresh" size={12} color={colors.textMuted} />
+                          <Text style={st.aiRefreshTxt}>Refresh Analysis</Text>
+                        </TouchableOpacity>
+                      )}
                     </>
                   ) : aiError ? (
                     <View style={st.aiErrorWrap}>
