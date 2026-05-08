@@ -11,13 +11,15 @@ interface AlertItem {
   id: string; title: string; message: string; type: string; ticker: string; price: string; source: string; created_by: string; created_at: string; severity?: string;
 }
 
-// Derive green/red from stored type
+// Derive green / yellow / red from stored type
 const isBearish = (type: string) => type === 'bearish' || type === 'loss';
-const alertColor = (type: string) => isBearish(type) ? colors.red : colors.green;
-const alertBg = (type: string) => isBearish(type) ? colors.redBg : colors.greenBg;
-const alertBorderColor = (type: string) => isBearish(type) ? 'rgba(245,70,107,0.15)' : 'rgba(0,212,160,0.15)';
-const alertLabel = (type: string) => isBearish(type) ? 'LOSER' : 'WINNER';
-const alertIcon = (type: string): any => isBearish(type) ? 'trending-down' : 'trending-up';
+const isBullish = (type: string) => type === 'bullish' || type === 'win';
+const alertColor = (type: string) => isBearish(type) ? colors.red : isBullish(type) ? colors.green : colors.yellow;
+const alertBg = (type: string) => isBearish(type) ? colors.redBg : isBullish(type) ? colors.greenBg : colors.yellowBg;
+const alertBorderColor = (type: string) =>
+  isBearish(type) ? 'rgba(245,70,107,0.15)' : isBullish(type) ? 'rgba(0,212,160,0.15)' : 'rgba(255,214,10,0.15)';
+const alertLabel = (type: string) => isBearish(type) ? 'LOSER' : isBullish(type) ? 'WINNER' : 'SIGNAL';
+const alertIcon = (type: string): any => isBearish(type) ? 'trending-down' : isBullish(type) ? 'trending-up' : 'flash';
 
 export default function AlertsScreen() {
   const { user, isGuest } = useAuth();
