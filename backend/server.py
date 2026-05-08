@@ -52,7 +52,7 @@ async def api_health_check():
     return {"status": "ok"}
 mongo_client = AsyncIOMotorClient(mongo_url)
 db = mongo_client[db_name]
-_executor = ThreadPoolExecutor(max_workers=2)
+_executor = ThreadPoolExecutor(max_workers=1)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -190,6 +190,7 @@ async def get_admin_user(user=Depends(get_current_user)):
 def _fetch_ndx_yfinance() -> Optional[dict]:
     """Fetch live NDX quote using yfinance (runs in thread pool)"""
     try:
+        import yfinance as yf
         ticker = yf.Ticker('^NDX')
         info = ticker.fast_info
         price = info.last_price
@@ -232,6 +233,7 @@ async def fetch_ndx_quote() -> Optional[dict]:
 def _fetch_ndx_candles_yf(resolution: str, count: int) -> Optional[dict]:
     """Fetch NDX candle data via yfinance"""
     try:
+        import yfinance as yf
         ticker = yf.Ticker('^NDX')
         interval_map = {'1': '1m', '5': '5m', '15': '15m', '60': '1h', 'D': '1d'}
         period_map = {'1': '1d', '5': '5d', '15': '5d', '60': '1mo', 'D': '6mo'}
@@ -2710,9 +2712,10 @@ async def startup():
         logger.info("Alerts Command backend init complete")
 
         # === Pre-warm slow caches so first user request is instant ===
+        # Lightweight Finnhub HTTP fetches run immediately.
+        # Heavy in-process libraries (yfinance/pandas & LiteLLM/openai) are delayed 90s
+        # so the K8s readiness probe registers the pod as healthy before RAM climbs.
         try:
-            asyncio.create_task(_fetch_recent_earnings(days_back=14))
-            asyncio.create_task(_generate_ai_sentiment())
             from datetime import datetime as _dt
             today = _dt.now(timezone.utc)
             ws = today.strftime('%Y-%m-%d')
@@ -2723,9 +2726,25 @@ async def startup():
                 asyncio.create_task(fetch_finnhub_economic_calendar(ws, we))
                 asyncio.create_task(fetch_finnhub_earnings(ef, ee))
                 asyncio.create_task(fetch_finnhub_news())
-            logger.info("Pre-warm: slow caches kicked off in background")
+            logger.info("Pre-warm: lightweight caches kicked off in background")
         except Exception as e:
-            logger.warning(f"Pre-warm failed: {e}")
+            logger.warning(f"Pre-warm (fast) failed: {e}")
+
+        # Heavy pre-warm deferred — runs 90s after startup to keep baseline RAM low
+        async def _deferred_heavy_prewarm():
+            import gc
+            await asyncio.sleep(90)
+            try:
+                logger.info("Pre-warm: starting deferred heavy caches (yfinance + AI)...")
+                await _fetch_recent_earnings(days_back=14)
+                gc.collect()
+                await _generate_ai_sentiment()
+                gc.collect()
+                logger.info("Pre-warm: deferred heavy caches complete")
+            except Exception as e:
+                logger.warning(f"Pre-warm (heavy/deferred) failed: {e}")
+
+        asyncio.create_task(_deferred_heavy_prewarm())
 
         # === Start Discord bot (no-op if DISCORD_BOT_TOKEN not set or DISCORD_BOT_ENABLED=false) ===
         try:
