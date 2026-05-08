@@ -20,7 +20,6 @@ import json
 import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
-import yfinance as yf
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')

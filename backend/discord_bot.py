@@ -102,7 +102,12 @@ async def _start_client(
     intents = discord.Intents.default()
     intents.message_content = True  # Required to read message text
 
-    _client = discord.Client(intents=intents)
+    _client = discord.Client(
+        intents=intents,
+        member_cache_flags=discord.MemberCacheFlags.none(),
+        max_messages=0,
+        chunk_guilds_at_startup=False,
+    )
 
     @_client.event
     async def on_ready():
