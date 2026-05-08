@@ -34,10 +34,7 @@ export default function TabLayout() {
         title: 'Markets',
         tabBarIcon: ({ color, size }) => <Ionicons name="stats-chart" size={size} color={color} />,
       }} />
-      <Tabs.Screen name="charts" options={{
-        title: 'Charts',
-        tabBarIcon: ({ color, size }) => <Ionicons name="analytics" size={size} color={color} />,
-      }} />
+      <Tabs.Screen name="charts" options={{ href: null }} />
       <Tabs.Screen name="alerts" options={{
         title: 'Alerts',
         tabBarIcon: ({ color, size }) => <Ionicons name="notifications" size={size} color={color} />,
