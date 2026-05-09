@@ -2256,6 +2256,114 @@ async def admin_reclassify_alerts(user=Depends(get_admin_user)):
             'message': f'Re-classified {updated} of {len(alerts)} alerts based on emoji detection.'}
 
 
+@api_router.post("/admin/reclassify-by-ndx-close")
+async def admin_reclassify_by_ndx_close(user=Depends(get_admin_user)):
+    """Admin: Reclassify ALL alerts by comparing the alert price to the NDX daily close.
+
+    Rule:
+      • NDX daily close > alert price  →  bullish (green)  — market closed ABOVE the level
+      • NDX daily close < alert price  →  bearish (red)    — market closed BELOW the level
+      • No price data / price = 0      →  skipped (unchanged)
+
+    Uses 3 years of ^NDX history from yfinance. Weekends / holidays use the nearest
+    prior trading day's close.
+    """
+    import yfinance as _yf
+    from datetime import date as _date, timedelta as _td
+
+    logger.info(f"Admin NDX-close reclassify started by {user['username']}")
+
+    # ------------------------------------------------------------------
+    # 1. Fetch 3 years of NDX daily history
+    # ------------------------------------------------------------------
+    try:
+        hist = _yf.Ticker('^NDX').history(period='3y')
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Could not fetch NDX history: {e}')
+
+    if hist.empty:
+        raise HTTPException(status_code=500, detail='NDX history returned empty data')
+
+    # Build date → close dict (strings: 'YYYY-MM-DD')
+    ndx_closes: dict = {d.date().isoformat(): float(row['Close']) for d, row in hist.iterrows()}
+
+    def get_close(date_str: str) -> float | None:
+        """Return close for date_str, walking back up to 7 calendar days for holidays/weekends."""
+        if date_str in ndx_closes:
+            return ndx_closes[date_str]
+        try:
+            d = _date.fromisoformat(date_str)
+            for delta in range(1, 8):
+                prev = (d - _td(days=delta)).isoformat()
+                if prev in ndx_closes:
+                    return ndx_closes[prev]
+        except Exception:
+            pass
+        return None
+
+    # ------------------------------------------------------------------
+    # 2. Load all alerts from DB
+    # ------------------------------------------------------------------
+    all_alerts = await db.alerts.find(
+        {}, {'id': 1, 'price': 1, 'created_at': 1, 'type': 1}
+    ).to_list(length=None)
+
+    updated = 0
+    skipped_no_price = 0
+    skipped_no_data = 0
+
+    for alert in all_alerts:
+        price = alert.get('price')
+        created_at = alert.get('created_at', '')
+
+        # Skip alerts with no meaningful price
+        if not price:
+            skipped_no_price += 1
+            continue
+        try:
+            alert_price_check = float(str(price).replace(',', '').replace('$', '').strip())
+        except (ValueError, TypeError):
+            skipped_no_price += 1
+            continue
+        if alert_price_check <= 0:
+            skipped_no_price += 1
+            continue
+
+        alert_price = float(str(price).replace(',', '').replace('$', '').strip())
+        date_str = str(created_at)[:10]  # 'YYYY-MM-DD'
+
+        close = get_close(date_str)
+        if close is None:
+            skipped_no_data += 1
+            continue
+
+        # Determine new type based on NDX daily close vs alert price
+        if close > alert_price:
+            new_type = 'bullish'   # market closed ABOVE the alert level → green
+        elif close < alert_price:
+            new_type = 'bearish'   # market closed BELOW the alert level → red
+        else:
+            skipped_no_data += 1   # exactly equal → leave unchanged
+            continue
+
+        await db.alerts.update_one({'id': alert['id']}, {'$set': {'type': new_type}})
+        updated += 1
+
+    msg = (
+        f'Updated {updated} of {len(all_alerts)} alerts. '
+        f'Skipped {skipped_no_price} (no price) + {skipped_no_data} (no NDX data).'
+    )
+    logger.info(f"Admin NDX-close reclassify complete: {msg}")
+    return {
+        'status': 'success',
+        'total': len(all_alerts),
+        'updated': updated,
+        'skipped_no_price': skipped_no_price,
+        'skipped_no_data': skipped_no_data,
+        'message': msg,
+    }
+
+
 @api_router.post("/admin/broadcast")
 async def broadcast_alert(data: AlertCreate, user=Depends(get_admin_user)):
     alert = {

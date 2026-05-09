@@ -78,6 +78,7 @@ export default function AdminScreen() {
   };
 
   const [reclassifying, setReclassifying] = useState(false);
+  const [reclassifyingNdx, setReclassifyingNdx] = useState(false);
   const [refreshingAI, setRefreshingAI] = useState(false);
 
   const reclassifyAlerts = async () => {
@@ -94,6 +95,25 @@ export default function AdminScreen() {
             fetchData();
           } catch (e: any) { Alert.alert('Error', e.message); }
           finally { setReclassifying(false); }
+        }}
+      ]
+    );
+  };
+
+  const reclassifyByNdxClose = async () => {
+    Alert.alert(
+      'Reclassify by NDX Daily Close',
+      'This compares each alert\'s price to the NDX daily close that day.\n\n• Close ABOVE alert price → 🟢 Bullish\n• Close BELOW alert price → 🔴 Bearish\n\nThis will update ALL historical alerts. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Run', style: 'destructive', onPress: async () => {
+          setReclassifyingNdx(true);
+          try {
+            const res = await apiFetch('/api/admin/reclassify-by-ndx-close', { method: 'POST' });
+            Alert.alert('Done ✅', res.message || `Updated ${res.updated} alerts.`);
+            fetchData();
+          } catch (e: any) { Alert.alert('Error', e.message); }
+          finally { setReclassifyingNdx(false); }
         }}
       ]
     );
@@ -251,8 +271,8 @@ export default function AdminScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Re-classify alert colors + Force AI refresh */}
-        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+        {/* Re-classify alert colors + Force AI refresh + NDX-close reclassify */}
+        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
           <TouchableOpacity
             style={[styles.toolBtn, { flex: 1, borderColor: '#FFD60A', backgroundColor: 'rgba(255,214,10,0.08)' }, reclassifying && { opacity: 0.6 }]}
             onPress={reclassifyAlerts}
@@ -280,6 +300,24 @@ export default function AdminScreen() {
             }
           </TouchableOpacity>
         </View>
+
+        {/* NDX Close reclassify — most accurate historical color fix */}
+        <TouchableOpacity
+          style={[styles.toolBtn, { borderColor: colors.bull, backgroundColor: 'rgba(0,212,160,0.08)', marginBottom: 16, flexDirection: 'row', gap: 10, paddingVertical: 14 }, reclassifyingNdx && { opacity: 0.6 }]}
+          onPress={reclassifyByNdxClose}
+          disabled={reclassifyingNdx}
+        >
+          {reclassifyingNdx
+            ? <><ActivityIndicator color={colors.bull} size="small" /><Text style={[styles.toolBtnTxt, { color: colors.bull }]}>Fetching NDX data &amp; updating...</Text></>
+            : <>
+                <Ionicons name="analytics-outline" size={18} color={colors.bull} />
+                <Text style={[styles.toolBtnTxt, { color: colors.bull, textAlign: 'left' }]}>
+                  Reclassify by NDX Daily Close{'\n'}
+                  <Text style={{ fontSize: 11, opacity: 0.7 }}>Green if close &gt; alert price · Red if close &lt; alert price</Text>
+                </Text>
+              </>
+          }
+        </TouchableOpacity>
 
         {/* Stats */}
         <View style={styles.statsRow}>

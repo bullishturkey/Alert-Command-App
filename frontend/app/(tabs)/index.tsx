@@ -238,14 +238,6 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
-      {/* Offline banner */}
-      {isOffline && (
-        <View style={styles.offlineBanner}>
-          <Ionicons name="cloud-offline-outline" size={13} color="rgba(255,255,255,0.45)" />
-          <Text style={styles.offlineTxt}>Offline — showing saved data{cacheAge ? ` · ${cacheAge}` : ''}</Text>
-        </View>
-      )}
-
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>

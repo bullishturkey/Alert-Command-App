@@ -2,7 +2,7 @@
   "expo": {
     "name": "Alerts Command",
     "slug": "frontend",
-    "version": "1.0.0",
+    "version": "3.2.2",
     "orientation": "portrait",
     "icon": "./assets/ndx-logo.png",
     "scheme": "frontend",
@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "3",
+      "buildNumber": "4",
       "infoPlist": {
         "NSCameraUsageDescription": "Scan QR codes for quick stock lookups",
         "UIBackgroundModes": [

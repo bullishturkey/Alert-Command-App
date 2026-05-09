@@ -55,6 +55,8 @@ Alerts Command is a mobile-first trading intelligence platform designed for a tr
 - ✅ Admin refresh-sentiment routing by market state fixed
 - ✅ Pre-warm not storing AI results bug fixed
 - ✅ On-device persistent cache layer (`utils/deviceCache.ts`) — stale-while-revalidate with AsyncStorage
+- ✅ App version 3.2.2 / iOS buildNumber 4
+- ✅ Historical alert reclassification by NDX daily close (`/api/admin/reclassify-by-ndx-close`) — 361/374 alerts updated
 
 ## Technical Architecture
 - **Frontend**: React Native (Expo) + Expo Router
