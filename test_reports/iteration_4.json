@@ -1,0 +1,60 @@
+{
+  "summary": "Auth bug-fix regression tests (iteration 4). All 15/15 tests passed covering: admin login, wrong-password 401, invalid/expired token 401 (not 500), regular user register→login→me flow, webhook regression, and AI sentiment regression.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_auth_bugfix.py",
+    "/app/test_reports/pytest/auth_bugfix_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "AuthContext.tsx: updateServerUrl() still writes to AsyncStorage SERVER_URL_KEY but loadToken() immediately clears it on next startup — low risk but the write is dead code. Consider removing or deprecating updateServerUrl().",
+    "api.ts: apiFetch() does not propagate 401 back to AuthContext to clear the token (it only throws Error). This is acceptable since loadToken() handles the wipe on next startup, but a real-time logout on 401 response would be cleaner."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_auth_bugfix.py"
+  ],
+  "success_rate": {
+    "backend": "100% (15/15 tests pass)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "One TEST_authbug_* user created during regular user flow tests.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Auth bug fix fully verified: (1) admin login returns {token, user} with is_admin=true, (2) wrong credentials → 401 with detail message, (3) GET /auth/me with invalid/expired/missing token → 401 (never 500), (4) new user register+login works, (5) webhook and AI sentiment endpoints unaffected by auth changes. Test file: /app/backend/tests/test_auth_bugfix.py",
+  "test_results": {
+    "TestLogin": {
+      "test_admin_login_returns_200_with_token": "PASS — 200, token present, is_admin=true",
+      "test_wrong_password_returns_401": "PASS — 401 with detail",
+      "test_wrong_email_returns_401": "PASS — 401",
+      "test_missing_fields_returns_4xx": "PASS — 422"
+    },
+    "TestGetMe": {
+      "test_valid_token_returns_200_with_user": "PASS — 200, user object correct, no _id leak",
+      "test_invalid_token_returns_401_not_500": "PASS — 401 (not 500)",
+      "test_expired_token_returns_401": "PASS — 401",
+      "test_no_auth_header_returns_401": "PASS — 401"
+    },
+    "TestRegularUserFlow": {
+      "test_register_returns_200_with_token": "PASS — token issued, is_admin=false",
+      "test_login_regular_user_returns_200": "PASS — 200, is_admin=false",
+      "test_regular_user_me_returns_200": "PASS — 200, email matches"
+    },
+    "TestWebhookRegression": {
+      "test_webhook_accepts_valid_secret": "PASS — 200, alert_id returned",
+      "test_webhook_rejects_missing_secret": "PASS — 403"
+    },
+    "TestSentimentRegression": {
+      "test_ai_sentiment_valid_token_returns_200": "PASS — 200, mode field present",
+      "test_ai_sentiment_requires_auth": "PASS — 401 without auth"
+    }
+  }
+}

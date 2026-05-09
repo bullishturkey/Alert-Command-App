@@ -1,23 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { TOKEN_KEY, SERVER_URL_KEY } from '../constants/auth';
+import { TOKEN_KEY } from '../constants/auth';
 
-const DEFAULT_API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const DEFAULT_API_URL = (process.env.EXPO_PUBLIC_BACKEND_URL || '').replace(/\/$/, '');
 
-async function getBaseUrl(): Promise<string> {
-  try {
-    const override = await AsyncStorage.getItem(SERVER_URL_KEY);
-    if (override && override.trim()) return override.trim().replace(/\/$/, '');
-  } catch { /* ignore */ }
-  return DEFAULT_API_URL.replace(/\/$/, '');
-}
+// Server URL is always EXPO_PUBLIC_BACKEND_URL — no AsyncStorage override.
+const BASE_URL = DEFAULT_API_URL;
 
 const TIMEOUT_MS = 15000; // 15-second timeout on all API calls
 
 export async function apiFetch(endpoint: string, options: RequestInit = {}) {
-  const [token, baseUrl] = await Promise.all([
-    AsyncStorage.getItem(TOKEN_KEY),
-    getBaseUrl(),
-  ]);
+  const token = await AsyncStorage.getItem(TOKEN_KEY);
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...((options.headers as Record<string, string>) || {}),
@@ -28,7 +20,7 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const resp = await fetch(`${baseUrl}${endpoint}`, { ...options, headers, signal: controller.signal });
+    const resp = await fetch(`${BASE_URL}${endpoint}`, { ...options, headers, signal: controller.signal });
     if (!resp.ok) {
       const error = await resp.json().catch(() => ({ detail: 'Request failed' }));
       throw new Error(error.detail || `Request failed: ${resp.status}`);

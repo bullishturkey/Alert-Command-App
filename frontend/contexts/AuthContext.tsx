@@ -2,23 +2,23 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TOKEN_KEY, GUEST_KEY, SERVER_URL_KEY } from '../constants/auth';
 
-const DEFAULT_API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
-const TIMEOUT_MS = 10000; // 10-second hard timeout on all auth requests
+const DEFAULT_API_URL = (process.env.EXPO_PUBLIC_BACKEND_URL || '').replace(/\/$/, '');
+const TIMEOUT_MS = 12000; // 12-second timeout on auth requests
 
-/** Returns AbortController + a promise that rejects after TIMEOUT_MS */
+/** Returns AbortController that fires after ms */
 function withTimeout(ms: number): AbortController {
   const controller = new AbortController();
   setTimeout(() => controller.abort(), ms);
   return controller;
 }
 
-/** Returns the active API base URL (user override takes priority). */
+/**
+ * Returns the active API base URL.
+ * Server URL override has been removed — always uses EXPO_PUBLIC_BACKEND_URL.
+ * Any previously stored override is ignored (cleared on startup in loadToken).
+ */
 export async function getApiUrl(): Promise<string> {
-  try {
-    const override = await AsyncStorage.getItem(SERVER_URL_KEY);
-    if (override && override.trim()) return override.trim().replace(/\/$/, '');
-  } catch { /* ignore */ }
-  return DEFAULT_API_URL.replace(/\/$/, '');
+  return DEFAULT_API_URL;
 }
 
 interface User {
@@ -58,8 +58,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadToken = async () => {
     try {
-      const apiUrl = await getApiUrl();
-      setServerUrl(apiUrl);
+      // Clear any stale server URL override from the old server-config UI.
+      // All requests must use EXPO_PUBLIC_BACKEND_URL from now on.
+      await AsyncStorage.removeItem(SERVER_URL_KEY).catch(() => null);
+
+      const apiUrl = DEFAULT_API_URL;
       const saved = await AsyncStorage.getItem(TOKEN_KEY);
       const guestMode = await AsyncStorage.getItem(GUEST_KEY);
       if (saved) {
@@ -68,14 +71,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           headers: { Authorization: `Bearer ${saved}` },
           signal: controller.signal,
         }).catch(() => null);
+
         if (resp?.ok) {
+          // Token is valid — restore session
           const data = await resp.json();
           setUser(data.user);
           setToken(saved);
-        } else {
+        } else if (resp !== null && (resp.status === 401 || resp.status === 403)) {
+          // Server explicitly rejected the token — it is expired or revoked
           await AsyncStorage.removeItem(TOKEN_KEY);
           if (guestMode === 'true') setIsGuest(true);
         }
+        // If resp is null (timeout / network error / server restarting):
+        // keep the token in AsyncStorage — the user's credentials are still valid.
+        // They'll see the login screen and can sign in immediately.
       } else if (guestMode === 'true') {
         setIsGuest(true);
       }
@@ -87,11 +96,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const login = useCallback(async (email: string, password: string) => {
-    const apiUrl = await getApiUrl();
     const controller = withTimeout(TIMEOUT_MS);
     let resp: Response;
     try {
-      resp = await fetch(`${apiUrl}/api/auth/login`, {
+      resp = await fetch(`${DEFAULT_API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -99,7 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
     } catch (e: any) {
       if (e?.name === 'AbortError') {
-        throw new Error('Server not responding. Check your internet or the server URL in Settings.');
+        throw new Error('Server is taking too long to respond. Please try again.');
       }
       throw new Error('Cannot reach server. Check your internet connection.');
     }
@@ -116,18 +124,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const register = useCallback(async (email: string, username: string, password: string) => {
-    const apiUrl = await getApiUrl();
     const controller = withTimeout(TIMEOUT_MS);
     let resp: Response;
     try {
-      resp = await fetch(`${apiUrl}/api/auth/register`, {
+      resp = await fetch(`${DEFAULT_API_URL}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, username, password }),
         signal: controller.signal,
       });
     } catch (e: any) {
-      if (e?.name === 'AbortError') throw new Error('Server not responding. Check server URL in Settings.');
+      if (e?.name === 'AbortError') throw new Error('Server is taking too long to respond. Please try again.');
       throw new Error('Cannot reach server. Check your internet connection.');
     }
     if (!resp.ok) {
@@ -157,8 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const deleteAccount = useCallback(async () => {
     if (!token) return;
-    const apiUrl = await getApiUrl();
-    const resp = await fetch(`${apiUrl}/api/auth/account`, {
+    const resp = await fetch(`${DEFAULT_API_URL}/api/auth/account`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` },
     });
