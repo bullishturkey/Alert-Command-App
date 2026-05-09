@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Build and maintain Alerts Command - a mobile-first trading intelligence platform. Latest work: Fixed login error messaging, imported 357 Discord historical alerts (2 years), added Discord history import to Admin panel, fixed delete alert functionality."
+user_problem_statement: "Build and maintain Alerts Command - a mobile-first trading intelligence platform. Latest work: (1) Discord alert color detection upgraded with keyword fallback (WINNER/LOSER/BUY/SELL/LONG/SHORT/CALL/PUT) in discord_bot.py + reclassify endpoint. (2) Fixed admin refresh-sentiment to route correctly for weekend/after-hours/live market states. (3) Fixed pre-warm to properly store AI cache results based on market state. (4) Login screen UI cleanup: removed subtitle, removed server selector."
 
 backend:
   - task: "Discord History Import - POST /api/admin/discord/import-history"
@@ -558,8 +558,54 @@ backend:
           comment: "✅ GET /api/preflight (authed) returned HTTP 200 in 0.34s (well under 8s target). economic_events array contains 18 items, 18/18 have time_utc matching exact format 'YYYY-MM-DD HH:MM:SS' (space separator, no trailing Z, no T separator). Samples: '2026-04-21 12:15:00', '2026-04-21 12:30:00'. Finnhub live source used ('economic_source' present)."
 
 agent_communication:
-    - agent: "testing"
-      message: "✅ RETEST OF 2 PREVIOUSLY-FAILING CASES — BOTH NOW PASS (10/10 checks via /app/backend_test_retest.py against external URL https://alerts-command.preview.emergentagent.com/api):\n\n[1] AI sentiment auth gating — FIXED ✅\n  • GET /api/ai/sentiment without Authorization header → HTTP 401 {'detail':'Not authenticated'} ✅\n  • GET /api/ai/sentiment with admin Bearer token → HTTP 200 with `mode`='daily_recap' ✅\n  • Code change verified at server.py:1739 — now uses Depends(get_current_user).\n\n[2] Admin revoke/restore via POST — FIXED ✅\n  • Registered throwaway user qa_retest_80494250@alertscommand-test.com — got user_id + token.\n  • Baseline: new user's token → GET /preflight → 200 ✅\n  • POST /api/admin/users/{id}/revoke (admin) → 200 {'status':'revoked'} ✅\n  • Revoked user's token → GET /preflight → 403 'Account access has been revoked' ✅\n  • POST /api/admin/users/{id}/restore (admin) → 200 {'status':'restored'} ✅\n  • Restored user's token → GET /preflight → 200 ✅\n  • DELETE /api/admin/users/{id} (admin) → 200 {'status':'deleted'} ✅\n  • Code change verified at server.py:1955 (revoke) and :1969 (restore) — now @api_router.post(...).\n\nBackend logs confirm: 'User revoked: qa_retest... by admin', 'User restored: ...', 'User deleted by admin: ...'. Both previously-failing tasks are now green. No retesting of passing features was done per instructions."
+    - agent: "main"
+      message: "4 fixes implemented. Please test these backend items: (1) POST /api/alerts/webhook with payload containing 'WINNER' keyword — should create alert with type='bullish'. (2) POST /api/alerts/webhook with payload containing 'LOSER' keyword — should create alert with type='bearish'. (3) POST /api/admin/refresh-sentiment (admin auth) — should return mode='live' during market hours, and 200 status. (4) GET /api/ai/sentiment (admin auth) — should return 200 with mode field and sentiment data. Admin creds: gregrussell90@gmail.com / Liltony2026. Webhook secret in env (check WEBHOOK_SECRET). Also regression: login, alerts list, preflight should still work."
+
+backend:
+  - task: "Discord keyword-based alert color detection"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/discord_bot.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added _BULLISH_KEYWORDS and _BEARISH_KEYWORDS frozensets to discord_bot.py. Updated _detect_alert_type() to scan word tokens after emoji scan fails. Keywords: bullish=winner/winners/long/buy/call/calls/bullish/breakout/bounce/squeeze/rip/moon; bearish=loser/losers/short/sell/put/puts/bearish/breakdown/dump/drop/crash. Also updated admin_reclassify_alerts local detect() function with same keyword sets. This fixes live Discord alerts that have no emojis but use trading keywords."
+
+  - task: "Admin refresh-sentiment routes correctly by market state"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Fixed POST /api/admin/refresh-sentiment to check _market_state() and route: weekend → clears _weekly_recap_cache[week_key] and calls _generate_weekly_recap(); after_hours → clears _daily_recap_cache[day_key] and calls _generate_daily_recap(); live → existing _generate_ai_sentiment() + cache store. Previously it always called _generate_ai_sentiment() regardless of market state, so weekend/after-hours refreshes were silently ignoring the recap caches."
+
+  - task: "Pre-warm properly caches AI results by market state"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Fixed _deferred_heavy_prewarm() to: (1) check _market_state() and warm the correct cache (weekly/daily/live), (2) actually store the result into _ai_sentiment_cache/_weekly_recap_cache/_daily_recap_cache as appropriate. Previously it called _generate_ai_sentiment() but discarded the result, so the live sentiment cache was never populated from the pre-warm."
+
+test_plan:
+  current_focus:
+    - "Discord keyword-based alert color detection"
+    - "Admin refresh-sentiment routes correctly by market state"
+    - "Pre-warm properly caches AI results by market state"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"\n\n[1] AI sentiment auth gating — FIXED ✅\n  • GET /api/ai/sentiment without Authorization header → HTTP 401 {'detail':'Not authenticated'} ✅\n  • GET /api/ai/sentiment with admin Bearer token → HTTP 200 with `mode`='daily_recap' ✅\n  • Code change verified at server.py:1739 — now uses Depends(get_current_user).\n\n[2] Admin revoke/restore via POST — FIXED ✅\n  • Registered throwaway user qa_retest_80494250@alertscommand-test.com — got user_id + token.\n  • Baseline: new user's token → GET /preflight → 200 ✅\n  • POST /api/admin/users/{id}/revoke (admin) → 200 {'status':'revoked'} ✅\n  • Revoked user's token → GET /preflight → 403 'Account access has been revoked' ✅\n  • POST /api/admin/users/{id}/restore (admin) → 200 {'status':'restored'} ✅\n  • Restored user's token → GET /preflight → 200 ✅\n  • DELETE /api/admin/users/{id} (admin) → 200 {'status':'deleted'} ✅\n  • Code change verified at server.py:1955 (revoke) and :1969 (restore) — now @api_router.post(...).\n\nBackend logs confirm: 'User revoked: qa_retest... by admin', 'User restored: ...', 'User deleted by admin: ...'. Both previously-failing tasks are now green. No retesting of passing features was done per instructions."
     - agent: "testing"
       message: "🧪 REVIEW-REQUEST REGRESSION RUN (27/30 passed via /app/backend_test.py against external URL).\n\n❌ CRITICAL FAIL 1 — /api/ai/sentiment auth gating missing:\n  GET /api/ai/sentiment without Bearer token still returns HTTP 200 with full payload (mode='daily_recap', sentiment.overall_sentiment='bullish', etc). Code at server.py:1739 uses Depends(get_optional_user) — must be changed to Depends(get_current_user) to match the review spec. Sibling endpoints /api/preflight (L757) and /api/alerts (L863) are correctly gated and return 401 as expected.\n\n❌ FAIL 2 — Admin revoke/restore method mismatch:\n  Review asked for POST /api/admin/users/{id}/revoke and /restore, but server.py:1955/1969 define them as PUT. POST → 405. Functionality is correct via PUT but clients following the spec will break. Recommend main agent change decorators to @api_router.post(...) OR add POST aliases.\n\n✅ ALL OTHER CHECKS PASS:\n  • /api/preflight, /api/alerts without token → 401 ✅\n  • /api/preflight, /api/alerts, /api/ai/sentiment with admin token → 200 ✅\n  • /api/ai/sentiment `mode` field present, matches US/Eastern time (currently 'daily_recap' — Tue 19:00 ET, after-hours); daily_recap.date_key='2026-04-21', date_label='Apr 21, 2026', indexes=5-entry array ✅\n  • Full revoke/restore/delete flow via PUT: revoked user blocked from /preflight (both old token and freshly re-issued token), restored user regains access, DELETE removes user from /admin/users ✅\n  • Non-admin → GET /admin/users → 403 ✅\n  • GET /preflight authed responded in 0.34s (< 8s), all 18 economic_events have time_utc in exact 'YYYY-MM-DD HH:MM:SS' format with no trailing Z ✅\n\nMain agent: please address the two failures above. Do not re-fix working features."
 

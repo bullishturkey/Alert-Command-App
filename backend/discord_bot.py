@@ -30,23 +30,48 @@ _BEARISH_EMOJIS = {
     '🔽', '🚨', '⚠️', '👎', '💀', '☠️', '🩸', '🆘',
 }
 
+# Text keyword fallback — catches plain-text trading alerts without emojis
+_BULLISH_KEYWORDS = frozenset([
+    'winner', 'winners', 'long', 'buy', 'buying', 'call', 'calls',
+    'bullish', 'breakout', 'bounce', 'squeeze', 'rip', 'moon',
+])
+_BEARISH_KEYWORDS = frozenset([
+    'loser', 'losers', 'short', 'sell', 'selling', 'put', 'puts',
+    'bearish', 'breakdown', 'dump', 'drop', 'crash',
+])
+
 
 def _detect_alert_type(text: str) -> str:
-    """Scan Discord message for colour emojis — bullish (green) wins over bearish (red).
-    Falls back to 'signal' (rendered green) if no emoji found."""
+    """Scan Discord message for colour emojis and trading keywords.
+    bullish (green) wins over bearish (red). Falls back to 'signal' if nothing found."""
     found_bearish = False
+
+    # 1. Character-level emoji scan (single-codepoint emojis)
     for ch in text:
         if ch in _BULLISH_EMOJIS:
             return 'bullish'
         if ch in _BEARISH_EMOJIS:
             found_bearish = True
-    # Check multi-char emoji sequences (e.g. ⬆️ is two codepoints)
+
+    # 2. Substring scan (multi-codepoint sequences like ⬆️ = 2 code points)
     for emoji in _BULLISH_EMOJIS:
         if emoji in text:
             return 'bullish'
     for emoji in _BEARISH_EMOJIS:
         if emoji in text:
             found_bearish = True
+
+    if found_bearish:
+        return 'bearish'
+
+    # 3. Keyword fallback — catches plain-text trading alerts with no emojis
+    text_lower = text.lower()
+    for word in re.findall(r'\b[a-z]+\b', text_lower):
+        if word in _BULLISH_KEYWORDS:
+            return 'bullish'
+        if word in _BEARISH_KEYWORDS:
+            found_bearish = True
+
     return 'bearish' if found_bearish else 'signal'
 
 

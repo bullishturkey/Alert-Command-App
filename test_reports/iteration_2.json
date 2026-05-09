@@ -1,0 +1,46 @@
+{
+  "summary": "Backend testing of 3 fixes: (1) webhook keyword detection, (2) admin refresh-sentiment market-state routing, (3) ai/sentiment mode field. 12/16 tests passed. Critical bug found: webhook endpoint does NOT call _detect_alert_type() — all WINNER/LOSER/BUY/SELL keyword tests fail.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/alerts/webhook",
+        "issue": "Webhook endpoint hardcodes 'type': 'signal' at server.py line 1138. Does NOT call _detect_alert_type() from discord_bot.py. All keyword-based type detection tests fail: WINNER→'signal' (expected 'bullish'), LOSER→'signal' (expected 'bearish'), BUY→'signal' (expected 'bullish'), SELL→'signal' (expected 'bearish').",
+        "priority": "CRITICAL",
+        "rca": "In server.py webhook_alert() function, the alert dict is constructed with a hardcoded `'type': 'signal'`. The _detect_alert_type() function in discord_bot.py is only called via parse_message() for Discord messages. It was never wired to the webhook endpoint.",
+        "fix_location": "server.py ~line 1138",
+        "fix": "Replace `'type': 'signal'` with `'type': _detect_alert_type(content or title)` after importing or inlining _detect_alert_type from discord_bot.py. Import at top of webhook function: `from discord_bot import _detect_alert_type` or move the function to server.py directly."
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_webhook_sentiment_fixes.py",
+    "/app/test_reports/pytest/webhook_sentiment_results.xml"
+  ],
+  "action_items": [
+    "CRITICAL: Fix webhook endpoint (server.py ~line 1138) to call _detect_alert_type() on the message content instead of hardcoding 'type': 'signal'. Import _detect_alert_type from discord_bot.py and apply it: `'type': _detect_alert_type(content or title)`",
+    "After fixing, re-run: pytest /app/backend/tests/test_webhook_sentiment_fixes.py::TestWebhookKeywordDetection -v"
+  ],
+  "critical_code_review_comments": [
+    "server.py line 1138: `'type': 'signal'` — should be `'type': _detect_alert_type(content or title)`. The _detect_alert_type function exists in discord_bot.py but was never connected to the webhook endpoint. Discord alerts correctly use it (via parse_message), but webhook alerts always produce type='signal'.",
+    "conftest.py uses outdated admin credentials (admin@ndxcommand.com / admin123). Correct credentials are gregrussell90@gmail.com / Liltony2026 (from test_credentials.md). The existing test_backend_apis.py tests may be failing on login tests — consider updating conftest.py admin credentials."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_webhook_sentiment_fixes.py"
+  ],
+  "success_rate": {
+    "backend": "75% (12/16 tests pass)",
+    "frontend": "not tested (backend only)"
+  },
+  "seed_data_creation": "Several TEST_ webhook alerts were inserted during testing (WINNER/LOSER/BUY/SELL test messages)",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The webhook keyword detection bug is in server.py at line 1138. After E1 fixes it, run pytest /app/backend/tests/test_webhook_sentiment_fixes.py to verify. Admin refresh-sentiment and ai/sentiment endpoints are working correctly. Login works with gregrussell90@gmail.com/Liltony2026.",
+  "rca_of_issue": "ROOT CAUSE: The webhook endpoint (/api/alerts/webhook) in server.py was built independently of the Discord message pipeline. The _detect_alert_type() function was added to discord_bot.py and correctly wired to Discord message processing (via parse_message()). However, the webhook endpoint was never updated to call this function — it hardcodes 'type': 'signal'. REPRODUCTION: POST /api/alerts/webhook with X-Webhook-Secret header and body {\"content\": \"WINNER NDX 19500 calls\"} → alert type is 'signal' instead of 'bullish'. MITIGATION: In server.py webhook_alert(), replace 'type': 'signal' with 'type': _detect_alert_type(content or title), importing _detect_alert_type from discord_bot."
+}

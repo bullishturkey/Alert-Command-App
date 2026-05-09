@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, ScrollView, Image, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, ScrollView, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, typography } from '../theme';
 
 export default function AuthScreen() {
-  const { user, isLoading, isGuest, login, register, continueAsGuest, serverUrl, updateServerUrl } = useAuth();
+  const { user, isLoading, isGuest, login, register, continueAsGuest } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
@@ -14,8 +14,6 @@ export default function AuthScreen() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [showServerConfig, setShowServerConfig] = useState(false);
-  const [serverInput, setServerInput] = useState('');
 
   if (isLoading) {
     return (
@@ -47,18 +45,6 @@ export default function AuthScreen() {
     }
   };
 
-  const handleSaveServer = async () => {
-    const url = serverInput.trim();
-    if (url && !url.startsWith('http')) {
-      setError('Server URL must start with https://');
-      return;
-    }
-    await updateServerUrl(url);
-    setShowServerConfig(false);
-    setError('');
-    Alert.alert('Server Updated', url ? `Now using:\n${url}` : 'Reset to default server.');
-  };
-
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.flex}>
@@ -70,7 +56,6 @@ export default function AuthScreen() {
             </View>
             <Text style={styles.brandName}>Alerts Command</Text>
             <Text style={styles.brandTagline}>THE TRADING INTELLIGENCE PLATFORM.</Text>
-            <Text style={styles.brandDesc}>Real-time NDX tracking, AI sentiment analysis,{'\n'}and community-driven trade intelligence.</Text>
           </View>
 
           {/* Form Card */}
@@ -137,42 +122,6 @@ export default function AuthScreen() {
             <Text style={styles.guestBtnText}>Browse as Guest</Text>
           </TouchableOpacity>
           <Text style={styles.guestHint}>View market data without an account</Text>
-
-          {/* Server Config (for admins fixing URL issues) */}
-          <TouchableOpacity style={styles.serverRow} onPress={() => { setShowServerConfig(!showServerConfig); setServerInput(serverUrl || ''); }}>
-            <Ionicons name="server-outline" size={13} color={colors.textMuted} />
-            <Text style={styles.serverLabel} numberOfLines={1}>
-              {showServerConfig ? 'Hide server config' : `Server: ${(serverUrl || 'default').replace('https://', '')}`}
-            </Text>
-            <Ionicons name={showServerConfig ? 'chevron-up' : 'chevron-down'} size={12} color={colors.textMuted} />
-          </TouchableOpacity>
-
-          {showServerConfig && (
-            <View style={styles.serverPanel}>
-              <Text style={styles.serverPanelTitle}>Server URL Override</Text>
-              <Text style={styles.serverPanelHint}>Set this if the app cannot connect. Leave blank to use the default.</Text>
-              <View style={styles.serverInputRow}>
-                <TextInput
-                  style={styles.serverInput}
-                  placeholder="https://your-server.com"
-                  placeholderTextColor={colors.textMuted}
-                  value={serverInput}
-                  onChangeText={setServerInput}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="url"
-                />
-              </View>
-              <View style={styles.serverBtns}>
-                <TouchableOpacity style={styles.serverSaveBtn} onPress={handleSaveServer}>
-                  <Text style={styles.serverSaveBtnText}>Save & Reconnect</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.serverResetBtn} onPress={() => { setServerInput(''); updateServerUrl(''); setShowServerConfig(false); }}>
-                  <Text style={styles.serverResetBtnText}>Reset to Default</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
 
           {/* Disclaimer */}
           <Text style={styles.disclaimer}>Alerts Command is an independent, third-party tool.{'\n'}Not affiliated with Nasdaq, Inc. or any stock exchange.</Text>

@@ -2142,9 +2142,41 @@ async def get_ai_sentiment(user=Depends(get_current_user)):
 @api_router.post("/admin/refresh-sentiment")
 async def admin_force_refresh_sentiment(user=Depends(get_admin_user)):
     """Admin: Force-regenerate AI sentiment immediately, bypassing cache TTL.
-    The new result is stored server-side and all users receive it on next request."""
+    Routes to weekly recap, daily recap, or live sentiment based on current market state."""
     global _ai_sentiment_cache, _ai_sentiment_cache_time, _ai_sentiment_refreshing
     import time as _time
+
+    state = _market_state()
+
+    # --- Weekend → regenerate weekly recap ---
+    if state == 'weekend':
+        week_key = _current_iso_week_key()
+        _weekly_recap_cache.pop(week_key, None)  # clear so regeneration is forced
+        try:
+            result = await _generate_weekly_recap()
+            if result.get('weekly_recap', {}).get('indexes') or result.get('weekly_recap', {}).get('top_gainers'):
+                _weekly_recap_cache[week_key] = result
+            logger.info(f"Admin force-refresh weekly recap {week_key} by {user['username']}")
+            return {'status': 'success', 'message': 'Weekly recap refreshed.', 'mode': 'weekly_recap', 'generated_at': datetime.now(timezone.utc).isoformat()}
+        except Exception as e:
+            logger.error(f"Admin force-refresh weekly recap failed: {e}")
+            raise HTTPException(status_code=500, detail=f'Weekly recap refresh failed: {str(e)}')
+
+    # --- After-hours → regenerate daily recap ---
+    if state == 'after_hours':
+        day_key = _current_trading_day_key()
+        _daily_recap_cache.pop(day_key, None)  # clear so regeneration is forced
+        try:
+            result = await _generate_daily_recap()
+            if result.get('daily_recap', {}).get('indexes') or result.get('daily_recap', {}).get('top_gainers'):
+                _daily_recap_cache[day_key] = result
+            logger.info(f"Admin force-refresh daily recap {day_key} by {user['username']}")
+            return {'status': 'success', 'message': 'Daily recap refreshed.', 'mode': 'daily_recap', 'generated_at': datetime.now(timezone.utc).isoformat()}
+        except Exception as e:
+            logger.error(f"Admin force-refresh daily recap failed: {e}")
+            raise HTTPException(status_code=500, detail=f'Daily recap refresh failed: {str(e)}')
+
+    # --- Live market hours → regenerate live sentiment ---
     if _ai_sentiment_refreshing:
         return {'status': 'already_refreshing', 'message': 'AI refresh already in progress. Check back in ~30 seconds.'}
     _ai_sentiment_refreshing = True
@@ -2152,8 +2184,8 @@ async def admin_force_refresh_sentiment(user=Depends(get_admin_user)):
         result = await _generate_ai_sentiment()
         _ai_sentiment_cache = result
         _ai_sentiment_cache_time = _time.time()
-        logger.info(f"Admin force-refresh AI sentiment by {user['username']}")
-        return {'status': 'success', 'message': 'AI sentiment refreshed and pushed to all users.', 'generated_at': datetime.now(timezone.utc).isoformat()}
+        logger.info(f"Admin force-refresh live sentiment by {user['username']}")
+        return {'status': 'success', 'message': 'AI sentiment refreshed and pushed to all users.', 'mode': 'live', 'generated_at': datetime.now(timezone.utc).isoformat()}
     except Exception as e:
         logger.error(f"Admin force-refresh AI sentiment failed: {e}")
         raise HTTPException(status_code=500, detail=f'AI refresh failed: {str(e)}')
@@ -2175,12 +2207,24 @@ async def admin_reclassify_alerts(user=Depends(get_admin_user)):
     def detect(text: str) -> str:
         if not text:
             return 'signal'
+        import re as _re
         found_bearish = False
         for emoji in _BULLISH:
             if emoji in text:
                 return 'bullish'
         for emoji in _BEARISH:
             if emoji in text:
+                found_bearish = True
+        if found_bearish:
+            return 'bearish'
+        # Keyword fallback for plain-text trading alerts
+        _bkw = {'winner', 'winners', 'long', 'buy', 'buying', 'call', 'calls', 'bullish', 'breakout', 'bounce', 'squeeze', 'moon'}
+        _rkw = {'loser', 'losers', 'short', 'sell', 'selling', 'put', 'puts', 'bearish', 'breakdown', 'dump', 'drop', 'crash'}
+        text_lower = text.lower()
+        for w in _re.findall(r'\b[a-z]+\b', text_lower):
+            if w in _bkw:
+                return 'bullish'
+            if w in _rkw:
                 found_bearish = True
         return 'bearish' if found_bearish else 'signal'
 
@@ -2791,13 +2835,35 @@ async def startup():
 
         # Heavy pre-warm deferred — runs 90s after startup to keep baseline RAM low
         async def _deferred_heavy_prewarm():
-            import gc
+            import gc, time as _prewarm_t
             await asyncio.sleep(90)
             try:
                 logger.info("Pre-warm: starting deferred heavy caches (yfinance + AI)...")
                 await _fetch_recent_earnings(days_back=14)
                 gc.collect()
-                await _generate_ai_sentiment()
+                # Warm the correct cache based on current market state
+                prewarm_state = _market_state()
+                if prewarm_state == 'weekend':
+                    wk = _current_iso_week_key()
+                    if wk not in _weekly_recap_cache:
+                        res = await _generate_weekly_recap()
+                        if res.get('weekly_recap', {}).get('indexes') or res.get('weekly_recap', {}).get('top_gainers'):
+                            _weekly_recap_cache[wk] = res
+                            logger.info(f"Pre-warm: weekly recap cached for {wk}")
+                elif prewarm_state == 'after_hours':
+                    dk = _current_trading_day_key()
+                    if dk not in _daily_recap_cache:
+                        res = await _generate_daily_recap()
+                        if res.get('daily_recap', {}).get('indexes') or res.get('daily_recap', {}).get('top_gainers'):
+                            _daily_recap_cache[dk] = res
+                            logger.info(f"Pre-warm: daily recap cached for {dk}")
+                else:
+                    # Live hours — populate the live sentiment cache
+                    res = await _generate_ai_sentiment()
+                    if res.get('sentiment'):
+                        _ai_sentiment_cache.update(res)
+                        _ai_sentiment_cache_time = _prewarm_t.time()
+                        logger.info("Pre-warm: live sentiment cached")
                 gc.collect()
                 logger.info("Pre-warm: deferred heavy caches complete")
             except Exception as e:

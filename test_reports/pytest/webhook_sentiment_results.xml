@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="4" skipped="0" tests="16" time="15.062" timestamp="2026-05-09T14:49:29.660579+00:00" hostname="agent-env-3dc0016f-1d12-497a-888c-8e26bbe4d49f"><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestLogin" name="test_login_with_correct_admin_credentials" time="0.475" /><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestLogin" name="test_login_with_wrong_password_returns_401" time="0.357" /><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestWebhookKeywordDetection" name="test_winner_keyword_produces_bullish_type" time="0.700"><failure message="AssertionError: WINNER keyword should produce type='bullish', got type='signal'. Bug: webhook endpoint hardcodes type='signal' without calling _detect_alert_type()&#10;assert 'signal' == 'bullish'&#10;  &#10;  - bullish&#10;  + signal">backend/tests/test_webhook_sentiment_fixes.py:113: in test_winner_keyword_produces_bullish_type
+    assert actual_type == "bullish", (
+E   AssertionError: WINNER keyword should produce type='bullish', got type='signal'. Bug: webhook endpoint hardcodes type='signal' without calling _detect_alert_type()
+E   assert 'signal' == 'bullish'
+E     
+E     - bullish
+E     + signal</failure></testcase><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestWebhookKeywordDetection" name="test_loser_keyword_produces_bearish_type" time="0.345"><failure message="AssertionError: LOSER keyword should produce type='bearish', got type='signal'. Bug: webhook endpoint hardcodes type='signal' without calling _detect_alert_type()&#10;assert 'signal' == 'bearish'&#10;  &#10;  - bearish&#10;  + signal">backend/tests/test_webhook_sentiment_fixes.py:129: in test_loser_keyword_produces_bearish_type
+    assert actual_type == "bearish", (
+E   AssertionError: LOSER keyword should produce type='bearish', got type='signal'. Bug: webhook endpoint hardcodes type='signal' without calling _detect_alert_type()
+E   assert 'signal' == 'bearish'
+E     
+E     - bearish
+E     + signal</failure></testcase><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestWebhookKeywordDetection" name="test_buy_keyword_produces_bullish_type" time="0.317"><failure message="AssertionError: BUY keyword should produce type='bullish', got type='signal'&#10;assert 'signal' == 'bullish'&#10;  &#10;  - bullish&#10;  + signal">backend/tests/test_webhook_sentiment_fixes.py:145: in test_buy_keyword_produces_bullish_type
+    assert actual_type == "bullish", (
+E   AssertionError: BUY keyword should produce type='bullish', got type='signal'
+E   assert 'signal' == 'bullish'
+E     
+E     - bullish
+E     + signal</failure></testcase><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestWebhookKeywordDetection" name="test_sell_keyword_produces_bearish_type" time="0.273"><failure message="AssertionError: SELL keyword should produce type='bearish', got type='signal'&#10;assert 'signal' == 'bearish'&#10;  &#10;  - bearish&#10;  + signal">backend/tests/test_webhook_sentiment_fixes.py:160: in test_sell_keyword_produces_bearish_type
+    assert actual_type == "bearish", (
+E   AssertionError: SELL keyword should produce type='bearish', got type='signal'
+E   assert 'signal' == 'bearish'
+E     
+E     - bearish
+E     + signal</failure></testcase><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestWebhookKeywordDetection" name="test_webhook_without_keyword_falls_back_to_signal" time="0.227" /><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestWebhookKeywordDetection" name="test_webhook_forbidden_without_secret" time="0.107" /><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestWebhookKeywordDetection" name="test_alerts_feed_contains_webhook_alerts" time="0.310" /><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestAdminRefreshSentiment" name="test_refresh_sentiment_returns_200_with_mode" time="10.905" /><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestAdminRefreshSentiment" name="test_refresh_sentiment_requires_admin_auth" time="0.122" /><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestAdminRefreshSentiment" name="test_refresh_sentiment_rejects_non_admin" time="0.437" /><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestAiSentiment" name="test_get_ai_sentiment_returns_200" time="0.106" /><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestAiSentiment" name="test_get_ai_sentiment_has_mode_field" time="0.104" /><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestAiSentiment" name="test_get_ai_sentiment_has_sentiment_field" time="0.103" /><testcase classname="backend.tests.test_webhook_sentiment_fixes.TestAiSentiment" name="test_get_ai_sentiment_requires_auth" time="0.102" /></testsuite></testsuites>
