@@ -94,8 +94,6 @@ export default function PreflightScreen() {
   const [dailyRecap, setDailyRecap] = useState<any>(null);
   const [ndxPrice, setNdxPrice] = useState<number | null>(null);
   const [ndxChange, setNdxChange] = useState<number | null>(null);
-  const [aiGeneratedAt, setAiGeneratedAt] = useState<string | null>(null);
-  const [, setNowTick] = useState(0); // forces re-render of timeAgo every minute
   const [isOffline, setIsOffline] = useState(false);
   const { user, isGuest } = useAuth();
   const isAdmin = user?.is_admin === true;
@@ -125,7 +123,6 @@ export default function PreflightScreen() {
         setDailyRecap(cachedAI.data.daily_recap || null);
         if (cachedAI.data.ndx_price) setNdxPrice(cachedAI.data.ndx_price);
         if (cachedAI.data.ndx_change !== undefined) setNdxChange(cachedAI.data.ndx_change);
-        if (cachedAI.data.generated_at) setAiGeneratedAt(cachedAI.data.generated_at);
       }
     })();
   }, [isGuest]);
@@ -156,7 +153,6 @@ export default function PreflightScreen() {
       setAiMode(data.mode === 'weekly_recap' ? 'weekly_recap' : data.mode === 'daily_recap' ? 'daily_recap' : 'live');
       setWeeklyRecap(data.weekly_recap || null);
       setDailyRecap(data.daily_recap || null);
-      if (data.generated_at) setAiGeneratedAt(data.generated_at);
       if (data.error && !data.sentiment?.summary) {
         setAiError(data.error);
       }
@@ -169,7 +165,6 @@ export default function PreflightScreen() {
           daily_recap: data.daily_recap || null,
           ndx_price: data.ndx_price,
           ndx_change: data.ndx_change,
-          generated_at: data.generated_at,
         });
       }
       // If backend is still generating, auto-retry after 30s
@@ -206,12 +201,6 @@ export default function PreflightScreen() {
   // Silent refresh when app comes back to foreground
   useAppForeground(() => { if (!isGuest) { fetchData(); } });
 
-  // Tick every 60s to refresh "X minutes ago" display
-  useEffect(() => {
-    const t = setInterval(() => setNowTick(n => n + 1), 60000);
-    return () => clearInterval(t);
-  }, []);
-
   const toggleExpand = (i: number) => setExpanded(p => ({ ...p, [i]: !p[i] }));
 
   if (isGuest) {
@@ -231,12 +220,6 @@ export default function PreflightScreen() {
 
   return (
     <SafeAreaView style={st.safe} edges={['top']}>
-      {isOffline && (
-        <View style={st.offlineBanner}>
-          <Ionicons name="cloud-offline-outline" size={13} color="rgba(255,255,255,0.45)" />
-          <Text style={st.offlineTxt}>Offline — showing saved data</Text>
-        </View>
-      )}
       <FlatList data={[1]} keyExtractor={() => 'pf'}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={colors.green} />}
         showsVerticalScrollIndicator={false}
@@ -261,9 +244,6 @@ export default function PreflightScreen() {
                     <View style={st.weekPill}><Text style={st.weekPillTxt}>{dailyRecap.date_label}</Text></View>
                   ) : null}
                 </View>
-                {aiGeneratedAt && aiSentiment?.summary ? (
-                  <Text style={st.updatedTxt}>Updated {timeAgo(aiGeneratedAt)}</Text>
-                ) : null}
                 <Ionicons name={aiExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
               </TouchableOpacity>
 
@@ -590,7 +570,6 @@ const st = StyleSheet.create({
   // Weekly Recap Card (weekend mode)
   weekPill: { backgroundColor: 'rgba(10,132,255,0.12)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(10,132,255,0.2)' },
   weekPillTxt: { color: colors.blue, fontSize: 10, fontWeight: '700' },
-  updatedTxt: { color: colors.textMuted, fontSize: 10, fontWeight: '600', marginRight: 4 },
   recapCard: { marginHorizontal: 20, backgroundColor: colors.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: 'rgba(10,132,255,0.2)' },
   recapClosedBadge: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 5, backgroundColor: 'rgba(10,132,255,0.1)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 100, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(10,132,255,0.15)' },
   recapClosedTxt: { color: colors.blue, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },

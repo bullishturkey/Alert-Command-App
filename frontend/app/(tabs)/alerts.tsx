@@ -280,14 +280,6 @@ export default function AlertsScreen() {
       {renderModal(false)}
       {renderModal(true)}
 
-      {/* Offline banner */}
-      {isOffline && (
-        <View style={st.offlineBanner}>
-          <Ionicons name="cloud-offline-outline" size={13} color="rgba(255,255,255,0.45)" />
-          <Text style={st.offlineTxt}>Offline — showing last saved alerts</Text>
-        </View>
-      )}
-
       <View style={st.header}>
         <View>
           <View style={st.hRow}><Text style={st.prefix}>⟩</Text><Text style={st.title}>Trade Alerts</Text></View>
