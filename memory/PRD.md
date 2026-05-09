@@ -54,7 +54,7 @@ Alerts Command is a mobile-first trading intelligence platform designed for a tr
 - ✅ Alert type always 'signal' bug fixed in webhook endpoint
 - ✅ Admin refresh-sentiment routing by market state fixed
 - ✅ Pre-warm not storing AI results bug fixed
-- ✅ K8s deployment OOM crash mitigated (90s startup delay)
+- ✅ AI sentiment non-blocking pattern for weekend/after-hours (returns placeholder in <20ms, generates in background)
 
 ## Technical Architecture
 - **Frontend**: React Native (Expo) + Expo Router

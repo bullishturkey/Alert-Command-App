@@ -116,9 +116,25 @@ export default function PreflightScreen() {
       if (data.error && !data.sentiment?.summary) {
         setAiError(data.error);
       }
+      // If backend is still generating, auto-retry after 30s
+      if (data.pending) {
+        setTimeout(() => fetchAISentiment(), 30000);
+      }
     } catch (e: any) {
-      setAiError('Failed to load AI analysis');
-      console.error('AI sentiment error:', e);
+      // On timeout/network error, retry once after 20s before showing error
+      setAiError('');
+      setTimeout(async () => {
+        try {
+          const data = await apiFetch('/api/ai/sentiment');
+          if (data.sentiment) setAiSentiment(data.sentiment);
+          setAiMode(data.mode === 'weekly_recap' ? 'weekly_recap' : data.mode === 'daily_recap' ? 'daily_recap' : 'live');
+          setWeeklyRecap(data.weekly_recap || null);
+          setDailyRecap(data.daily_recap || null);
+        } catch {
+          setAiError('AI analysis unavailable. Pull down to refresh.');
+        }
+      }, 20000);
+      console.error('AI sentiment error (will retry):', e);
     } finally {
       setAiLoading(false);
     }

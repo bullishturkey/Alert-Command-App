@@ -559,7 +559,7 @@ backend:
 
 agent_communication:
     - agent: "main"
-      message: "4 fixes implemented. Please test these backend items: (1) POST /api/alerts/webhook with payload containing 'WINNER' keyword — should create alert with type='bullish'. (2) POST /api/alerts/webhook with payload containing 'LOSER' keyword — should create alert with type='bearish'. (3) POST /api/admin/refresh-sentiment (admin auth) — should return mode='live' during market hours, and 200 status. (4) GET /api/ai/sentiment (admin auth) — should return 200 with mode field and sentiment data. Admin creds: gregrussell90@gmail.com / Liltony2026. Webhook secret in env (check WEBHOOK_SECRET). Also regression: login, alerts list, preflight should still work."
+      message: "Critical AI sentiment fix: GET /api/ai/sentiment was blocking synchronously for 20-40s on cache miss (yfinance+Claude), causing frontend 15s AbortError → 'Failed to load AI analysis'. Fixed by making weekend/after_hours modes non-blocking: fire background generation task immediately and return placeholder in <20ms. Frontend also updated to auto-retry after 30s when pending=true, and retry once after 20s on network error instead of immediately showing failure. Test: GET /api/ai/sentiment → should return 200 in <100ms with either full data OR pending=true placeholder. On second call 35s later → should return full weekly_recap data. Admin: gregrussell90@gmail.com / Liltony2026."
 
 backend:
   - task: "Discord keyword-based alert color detection"
