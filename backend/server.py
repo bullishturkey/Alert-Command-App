@@ -1078,6 +1078,34 @@ async def delete_alert(alert_id: str, user=Depends(get_admin_user)):
         raise HTTPException(status_code=404, detail='Alert not found')
     return {'status': 'deleted'}
 
+
+def _detect_discord_type(text: str) -> str:
+    """Detect bullish/bearish/signal type from message text.
+    Checks Unicode emojis first, then falls back to trading keywords."""
+    try:
+        from discord_bot import _detect_alert_type
+        return _detect_alert_type(text or '')
+    except Exception:
+        # Inline fallback if import fails
+        if not text:
+            return 'signal'
+        _BUP = {'🟢', '✅', '📈', '🚀', '💚', '🏆', '💰', '🎯', '💹', '👍', '🌟', '🔝', '⬆️', '▲'}
+        _BDN = {'🔴', '❌', '📉', '💀', '🛑', '⛔', '🚨', '⚠️', '👎', '☠️', '⬇️', '▼', '🆘'}
+        for c in text:
+            if c in _BUP: return 'bullish'
+        for c in text:
+            if c in _BDN: return 'bearish'
+        tl = text.lower()
+        import re as _re
+        bkw = {'winner','winners','long','buy','buying','call','calls','bullish','breakout','bounce','moon','squeeze','rip'}
+        rkw = {'loser','losers','short','sell','selling','put','puts','bearish','breakdown','dump','drop','crash'}
+        found_bear = False
+        for w in _re.findall(r'\b[a-z]+\b', tl):
+            if w in bkw: return 'bullish'
+            if w in rkw: found_bear = True
+        return 'bearish' if found_bear else 'signal'
+
+
 @api_router.post("/alerts/webhook")
 async def webhook_alert(
     body: dict = Body(...),
@@ -1135,7 +1163,7 @@ async def webhook_alert(
         'id': str(uuid.uuid4()),
         'title': title,
         'message': content or title,
-        'type': 'signal',
+        'type': _detect_discord_type(content or title),
         'ticker': 'NDX',
         'severity': 'high',
         'source': 'webhook',

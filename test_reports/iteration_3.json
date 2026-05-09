@@ -1,0 +1,55 @@
+{
+  "summary": "Backend regression test for 3 fixes: (1) _detect_discord_type() keyword detection in webhook, (2) admin refresh-sentiment market-state routing, (3) login. All 15/15 tests passed. All critical issues from iteration_2 are resolved.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_webhook_sentiment_fixes.py",
+    "/app/test_reports/pytest/webhook_sentiment_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_webhook_sentiment_fixes.py"
+  ],
+  "success_rate": {
+    "backend": "100% (15/15 tests pass)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "Several TEST webhook alerts created during keyword detection tests (WINNER/LOSER/BUY/NDX 19500 messages)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 3 webhook/sentiment fixes confirmed working. server.py _detect_discord_type() at line 1082 correctly imports from discord_bot._detect_alert_type. Webhook endpoint calls it at line 1166. Admin refresh-sentiment correctly routes to weekly_recap on weekends. Login with gregrussell90@gmail.com/Liltony2026 works. Test file: /app/backend/tests/test_webhook_sentiment_fixes.py",
+  "test_results": {
+    "TestLogin": {
+      "test_login_with_correct_admin_credentials": "PASS - 200, token present, is_admin=true",
+      "test_login_with_wrong_password_returns_401": "PASS - 401 as expected"
+    },
+    "TestWebhookKeywordDetection": {
+      "test_winner_ndx_calls_closed_produces_bullish": "PASS - type='bullish'",
+      "test_loser_spy_puts_breakdown_produces_bearish": "PASS - type='bearish'",
+      "test_buy_signal_at_support_produces_bullish": "PASS - type='bullish'",
+      "test_ndx_19500_no_keywords_produces_signal": "PASS - type='signal'",
+      "test_webhook_forbidden_without_secret": "PASS - 403",
+      "test_alerts_feed_contains_webhook_alerts": "PASS - alert found in feed"
+    },
+    "TestAdminRefreshSentiment": {
+      "test_refresh_sentiment_returns_200_with_mode": "PASS - status='success', mode='weekly_recap' (Saturday = weekend state)",
+      "test_refresh_sentiment_requires_admin_auth": "PASS - 401 without auth",
+      "test_refresh_sentiment_rejects_non_admin": "PASS - 403 for non-admin"
+    },
+    "TestAiSentiment": {
+      "test_get_ai_sentiment_returns_200": "PASS",
+      "test_get_ai_sentiment_has_mode_field": "PASS",
+      "test_get_ai_sentiment_has_sentiment_field": "PASS",
+      "test_get_ai_sentiment_requires_auth": "PASS - 401 without auth"
+    }
+  }
+}

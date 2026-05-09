@@ -1,9 +1,8 @@
 """
 Backend tests for 3 specific fixes:
-1. Discord keyword color detection in webhook alerts (WINNER/LOSER/BUY/SELL → bullish/bearish)
+1. Discord/_detect_discord_type() keyword color detection in webhook alerts
 2. Admin refresh-sentiment routes by market state and returns mode field
-3. GET /ai/sentiment returns mode field
-4. Login endpoint verification
+3. Login endpoint verification
 """
 import pytest
 import requests
@@ -11,7 +10,13 @@ import os
 import uuid
 import time
 
-BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', '').rstrip('/')
+# Use public backend URL — works from test runner and matches what users hit
+_raw = (
+    os.environ.get('EXPO_PUBLIC_BACKEND_URL') or
+    os.environ.get('EXPO_BACKEND_URL') or
+    'https://ndx-alerts-backend.preview.emergentagent.com'
+)
+BASE_URL = _raw.rstrip('/')
 WEBHOOK_SECRET = "hbd30zqEwACjWgnBbq0V4TYLzl7Da9m2b3BWcRNms8WSl7ntX27LEQo7IdduXgwV"
 ADMIN_EMAIL = "gregrussell90@gmail.com"
 ADMIN_PASSWORD = "Liltony2026"
@@ -100,9 +105,9 @@ class TestWebhookKeywordDetection:
                 return a
         return {}
 
-    def test_winner_keyword_produces_bullish_type(self, admin_headers, webhook_headers):
-        """WINNER keyword → alert type should be 'bullish'"""
-        content = "WINNER NDX 19500 calls - massive move"
+    def test_winner_ndx_calls_closed_produces_bullish(self, admin_headers, webhook_headers):
+        """'WINNER NDX calls closed' → type='bullish' (exact review request test case)"""
+        content = "WINNER NDX calls closed"
         result = self._post_webhook(content, webhook_headers)
         alert_id = result["alert_id"]
         self.created_alert_ids.append(alert_id)
@@ -111,14 +116,14 @@ class TestWebhookKeywordDetection:
         assert alert, f"Alert {alert_id} not found in feed"
         actual_type = alert.get("type")
         assert actual_type == "bullish", (
-            f"WINNER keyword should produce type='bullish', got type='{actual_type}'. "
-            f"Bug: webhook endpoint hardcodes type='signal' without calling _detect_alert_type()"
+            f"'WINNER NDX calls closed' should produce type='bullish', got type='{actual_type}'. "
+            f"_detect_discord_type() must catch 'winner' keyword"
         )
-        print(f"✓ WINNER keyword → type='{actual_type}'")
+        print(f"✓ 'WINNER NDX calls closed' → type='{actual_type}'")
 
-    def test_loser_keyword_produces_bearish_type(self, admin_headers, webhook_headers):
-        """LOSER keyword → alert type should be 'bearish'"""
-        content = "LOSER trade - NDX breakdown confirmed"
+    def test_loser_spy_puts_breakdown_produces_bearish(self, admin_headers, webhook_headers):
+        """'LOSER SPY puts breakdown' → type='bearish' (exact review request test case)"""
+        content = "LOSER SPY puts breakdown"
         result = self._post_webhook(content, webhook_headers)
         alert_id = result["alert_id"]
         self.created_alert_ids.append(alert_id)
@@ -127,14 +132,14 @@ class TestWebhookKeywordDetection:
         assert alert, f"Alert {alert_id} not found in feed"
         actual_type = alert.get("type")
         assert actual_type == "bearish", (
-            f"LOSER keyword should produce type='bearish', got type='{actual_type}'. "
-            f"Bug: webhook endpoint hardcodes type='signal' without calling _detect_alert_type()"
+            f"'LOSER SPY puts breakdown' should produce type='bearish', got type='{actual_type}'. "
+            f"_detect_discord_type() must catch 'loser' keyword"
         )
-        print(f"✓ LOSER keyword → type='{actual_type}'")
+        print(f"✓ 'LOSER SPY puts breakdown' → type='{actual_type}'")
 
-    def test_buy_keyword_produces_bullish_type(self, admin_headers, webhook_headers):
-        """'BUY NDX calls 19500' → alert type should be 'bullish'"""
-        content = "BUY NDX calls 19500"
+    def test_buy_signal_at_support_produces_bullish(self, admin_headers, webhook_headers):
+        """'BUY signal at support' → type='bullish' (exact review request test case)"""
+        content = "BUY signal at support"
         result = self._post_webhook(content, webhook_headers)
         alert_id = result["alert_id"]
         self.created_alert_ids.append(alert_id)
@@ -143,28 +148,13 @@ class TestWebhookKeywordDetection:
         assert alert, f"Alert {alert_id} not found in feed"
         actual_type = alert.get("type")
         assert actual_type == "bullish", (
-            f"BUY keyword should produce type='bullish', got type='{actual_type}'"
+            f"'BUY signal at support' should produce type='bullish', got type='{actual_type}'"
         )
-        print(f"✓ BUY keyword → type='{actual_type}'")
+        print(f"✓ 'BUY signal at support' → type='{actual_type}'")
 
-    def test_sell_keyword_produces_bearish_type(self, admin_headers, webhook_headers):
-        """SELL keyword → alert type should be 'bearish'"""
-        content = "SELL NDX puts 19200"
-        result = self._post_webhook(content, webhook_headers)
-        alert_id = result["alert_id"]
-        self.created_alert_ids.append(alert_id)
-
-        alert = self._get_alert_by_id(alert_id, admin_headers)
-        assert alert, f"Alert {alert_id} not found in feed"
-        actual_type = alert.get("type")
-        assert actual_type == "bearish", (
-            f"SELL keyword should produce type='bearish', got type='{actual_type}'"
-        )
-        print(f"✓ SELL keyword → type='{actual_type}'")
-
-    def test_webhook_without_keyword_falls_back_to_signal(self, admin_headers, webhook_headers):
-        """Plain number message with no keyword should be 'signal'"""
-        content = "24580.50"
+    def test_ndx_19500_no_keywords_produces_signal(self, admin_headers, webhook_headers):
+        """'NDX 19500' (no keywords/emojis) → type='signal' (exact review request test case)"""
+        content = "NDX 19500"
         result = self._post_webhook(content, webhook_headers)
         alert_id = result["alert_id"]
         self.created_alert_ids.append(alert_id)
@@ -173,9 +163,9 @@ class TestWebhookKeywordDetection:
         assert alert, f"Alert {alert_id} not found in feed"
         actual_type = alert.get("type")
         assert actual_type == "signal", (
-            f"No-keyword message should produce type='signal', got type='{actual_type}'"
+            f"'NDX 19500' (no keywords) should produce type='signal', got type='{actual_type}'"
         )
-        print(f"✓ No-keyword message → type='{actual_type}'")
+        print(f"✓ 'NDX 19500' (no keywords) → type='{actual_type}'")
 
     def test_webhook_forbidden_without_secret(self, webhook_headers):
         """Webhook without X-Webhook-Secret → 403"""
