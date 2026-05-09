@@ -66,6 +66,7 @@ class UserRegister(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str
+    remember_me: bool = False
 
 class AlertCreate(BaseModel):
     title: str
@@ -142,11 +143,12 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode(), hashed.encode())
 
-def create_token(user_id: str, is_admin: bool) -> str:
+def create_token(user_id: str, is_admin: bool, remember_me: bool = False) -> str:
+    days = 90 if remember_me else 7  # 90-day "stay logged in" vs 7-day standard
     payload = {
         'sub': user_id,
         'is_admin': is_admin,
-        'exp': datetime.now(timezone.utc) + timedelta(days=7)
+        'exp': datetime.now(timezone.utc) + timedelta(days=days)
     }
     return pyjwt.encode(payload, JWT_SECRET, algorithm='HS256')
 
