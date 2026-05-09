@@ -1176,8 +1176,12 @@ async def webhook_alert(
     await db.alerts.insert_one(alert)
     logger.info(f"Webhook alert received: {title}")
     
-    # Send push notifications to all registered devices
-    await send_push_notifications(title, content or title, alert['id'])
+    # Send push notifications with formatted title (emoji + ticker + type + price)
+    type_emoji = {'bullish': '🟢', 'bearish': '🔴', 'signal': '⚡'}.get(alert['type'], '⚡')
+    type_label = {'bullish': 'Bullish', 'bearish': 'Bearish', 'signal': 'Signal'}.get(alert['type'], 'Signal')
+    price_part = f" — ${price}" if price else ''
+    push_title = f"{type_emoji} {alert['ticker']} {type_label}{price_part}".strip()
+    await send_push_notifications(push_title, content or title, alert['id'])
     
     return {'status': 'ok', 'alert_id': alert['id']}
 
@@ -3031,7 +3035,15 @@ async def startup():
                 }
                 await db.alerts.insert_one(alert)
                 try:
-                    await send_push_notifications(alert['title'], alert['message'], alert['id'])
+                    # Build a clean push title: "🟢 AAPL Bullish Signal — $172.50"
+                    type_emoji = {'bullish': '🟢', 'bearish': '🔴', 'signal': '⚡'}.get(alert['type'], '⚡')
+                    type_label = {'bullish': 'Bullish', 'bearish': 'Bearish', 'signal': 'Signal'}.get(alert['type'], 'Signal')
+                    ticker_part = alert['ticker'] or ''
+                    price_part = f" — ${alert['price']}" if alert.get('price') else ''
+                    push_title = f"{type_emoji} {ticker_part} {type_label}{price_part}".strip()
+                    # Body: original message (stripped of redundant emoji/title leading line)
+                    push_body = (alert.get('message') or alert['title'])
+                    await send_push_notifications(push_title, push_body, alert['id'])
                 except Exception as _pe:
                     logger.warning(f"Push after Discord alert failed: {_pe}")
 
