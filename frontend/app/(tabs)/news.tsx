@@ -7,6 +7,7 @@ import { readCache, writeCache, CACHE_KEYS, CACHE_TTL_MS } from '../../utils/dev
 import { colors, spacing, radius } from '../../theme';
 import { useAuth } from '../../contexts/AuthContext';
 import GuestGate from '../../components/GuestGate';
+import { useAppForeground } from '../../hooks/useAppForeground';
 
 interface EconomicEvent {
   event: string; date: string; time_utc?: string; time?: string; impact: string; category: string;
@@ -196,6 +197,9 @@ export default function PreflightScreen() {
     const i = setInterval(fetchData, 60000);
     return () => clearInterval(i);
   }, [fetchData, fetchAISentiment, isGuest]);
+
+  // Silent refresh when app comes back to foreground
+  useAppForeground(() => { if (!isGuest) { fetchData(); } });
 
   const toggleExpand = (i: number) => setExpanded(p => ({ ...p, [i]: !p[i] }));
 

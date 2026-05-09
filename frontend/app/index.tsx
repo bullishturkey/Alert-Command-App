@@ -14,6 +14,7 @@ export default function AuthScreen() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
 
   if (isLoading) {
     return (
@@ -34,7 +35,7 @@ export default function AuthScreen() {
     setLoading(true);
     try {
       if (isLogin) {
-        await login(email, password);
+        await login(email, password, rememberMe);
       } else {
         await register(email, username, password);
       }
@@ -110,6 +111,20 @@ export default function AuthScreen() {
             </TouchableOpacity>
 
             {isLogin && (
+              <TouchableOpacity
+                testID="remember-me-toggle"
+                style={styles.rememberRow}
+                onPress={() => setRememberMe(!rememberMe)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.checkbox, rememberMe && styles.checkboxActive]}>
+                  {rememberMe && <Ionicons name="checkmark" size={12} color="#000" />}
+                </View>
+                <Text style={styles.rememberLabel}>Stay logged in for 90 days</Text>
+              </TouchableOpacity>
+            )}
+
+            {isLogin && (
               <View style={styles.demoHint}>
                 <Text style={styles.demoText}>New here? Sign up to get started</Text>
               </View>
@@ -169,6 +184,11 @@ const styles = StyleSheet.create({
   submitBtn: { backgroundColor: colors.green, borderRadius: radius.md, paddingVertical: 16, alignItems: 'center', marginTop: spacing.sm },
   submitBtnDisabled: { opacity: 0.6 },
   submitBtnText: { color: '#000', fontSize: 16, fontWeight: '700' },
+
+  rememberRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: spacing.md, paddingVertical: 2 },
+  checkbox: { width: 20, height: 20, borderRadius: 5, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center' },
+  checkboxActive: { backgroundColor: colors.green, borderColor: colors.green },
+  rememberLabel: { color: colors.textSecondary, fontSize: 13, fontWeight: '500' },
 
   demoHint: { marginTop: spacing.lg, alignItems: 'center' },
   demoText: { color: colors.textMuted, fontSize: 11, letterSpacing: 0.3 },

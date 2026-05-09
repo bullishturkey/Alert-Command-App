@@ -471,7 +471,7 @@ async def login(data: UserLogin):
     user = await db.users.find_one({'email': data.email}, {'_id': 0})
     if not user or not verify_password(data.password, user['password_hash']):
         raise HTTPException(status_code=401, detail='Invalid credentials')
-    token = create_token(user['id'], user.get('is_admin', False))
+    token = create_token(user['id'], user.get('is_admin', False), data.remember_me)
     return {
         'token': token,
         'user': {'id': user['id'], 'email': user['email'], 'username': user['username'], 'is_admin': user.get('is_admin', False), 'created_at': user.get('created_at', '')}
@@ -2258,39 +2258,30 @@ async def admin_reclassify_alerts(user=Depends(get_admin_user)):
             'message': f'Re-classified {updated} of {len(alerts)} alerts based on emoji detection.'}
 
 
-@api_router.post("/admin/reclassify-by-ndx-close")
-async def admin_reclassify_by_ndx_close(user=Depends(get_admin_user)):
-    """Admin: Reclassify ALL alerts by comparing the alert price to the NDX daily close.
+async def _run_ndx_close_reclassify() -> dict:
+    """Shared logic: reclassify ALL alerts by comparing alert price to the NDX daily close.
 
     Rule:
-      • NDX daily close > alert price  →  bullish (green)  — market closed ABOVE the level
-      • NDX daily close < alert price  →  bearish (red)    — market closed BELOW the level
-      • No price data / price = 0      →  skipped (unchanged)
-
-    Uses 3 years of ^NDX history from yfinance. Weekends / holidays use the nearest
-    prior trading day's close.
+      • NDX daily close > alert price  →  bullish (green)
+      • NDX daily close < alert price  →  bearish (red)
+      • No price / price = 0           →  skipped (unchanged)
     """
     import yfinance as _yf
     from datetime import date as _date, timedelta as _td
 
-    logger.info(f"Admin NDX-close reclassify started by {user['username']}")
-
-    # ------------------------------------------------------------------
-    # 1. Fetch 3 years of NDX daily history
-    # ------------------------------------------------------------------
     try:
         hist = _yf.Ticker('^NDX').history(period='3y')
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Could not fetch NDX history: {e}')
+        logger.error(f"NDX reclassify: could not fetch history: {e}")
+        return {'status': 'error', 'message': str(e)}
 
     if hist.empty:
-        raise HTTPException(status_code=500, detail='NDX history returned empty data')
+        logger.warning("NDX reclassify: history empty")
+        return {'status': 'error', 'message': 'NDX history returned empty data'}
 
-    # Build date → close dict (strings: 'YYYY-MM-DD')
     ndx_closes: dict = {d.date().isoformat(): float(row['Close']) for d, row in hist.iterrows()}
 
-    def get_close(date_str: str) -> float | None:
-        """Return close for date_str, walking back up to 7 calendar days for holidays/weekends."""
+    def get_close(date_str: str):
         if date_str in ndx_closes:
             return ndx_closes[date_str]
         try:
@@ -2303,9 +2294,6 @@ async def admin_reclassify_by_ndx_close(user=Depends(get_admin_user)):
             pass
         return None
 
-    # ------------------------------------------------------------------
-    # 2. Load all alerts from DB
-    # ------------------------------------------------------------------
     all_alerts = await db.alerts.find(
         {}, {'id': 1, 'price': 1, 'created_at': 1, 'type': 1}
     ).to_list(length=None)
@@ -2317,35 +2305,30 @@ async def admin_reclassify_by_ndx_close(user=Depends(get_admin_user)):
     for alert in all_alerts:
         price = alert.get('price')
         created_at = alert.get('created_at', '')
-
-        # Skip alerts with no meaningful price
         if not price:
             skipped_no_price += 1
             continue
         try:
-            alert_price_check = float(str(price).replace(',', '').replace('$', '').strip())
+            alert_price = float(str(price).replace(',', '').replace('$', '').strip())
         except (ValueError, TypeError):
             skipped_no_price += 1
             continue
-        if alert_price_check <= 0:
+        if alert_price <= 0:
             skipped_no_price += 1
             continue
 
-        alert_price = float(str(price).replace(',', '').replace('$', '').strip())
-        date_str = str(created_at)[:10]  # 'YYYY-MM-DD'
-
+        date_str = str(created_at)[:10]
         close = get_close(date_str)
         if close is None:
             skipped_no_data += 1
             continue
 
-        # Determine new type based on NDX daily close vs alert price
         if close > alert_price:
-            new_type = 'bullish'   # market closed ABOVE the alert level → green
+            new_type = 'bullish'
         elif close < alert_price:
-            new_type = 'bearish'   # market closed BELOW the alert level → red
+            new_type = 'bearish'
         else:
-            skipped_no_data += 1   # exactly equal → leave unchanged
+            skipped_no_data += 1
             continue
 
         await db.alerts.update_one({'id': alert['id']}, {'$set': {'type': new_type}})
@@ -2355,15 +2338,18 @@ async def admin_reclassify_by_ndx_close(user=Depends(get_admin_user)):
         f'Updated {updated} of {len(all_alerts)} alerts. '
         f'Skipped {skipped_no_price} (no price) + {skipped_no_data} (no NDX data).'
     )
-    logger.info(f"Admin NDX-close reclassify complete: {msg}")
-    return {
-        'status': 'success',
-        'total': len(all_alerts),
-        'updated': updated,
-        'skipped_no_price': skipped_no_price,
-        'skipped_no_data': skipped_no_data,
-        'message': msg,
-    }
+    logger.info(f"NDX reclassify complete: {msg}")
+    return {'status': 'success', 'updated': updated, 'total': len(all_alerts), 'message': msg}
+
+
+@api_router.post("/admin/reclassify-by-ndx-close")
+async def admin_reclassify_by_ndx_close(user=Depends(get_admin_user)):
+    """Admin: Reclassify ALL alerts by comparing the alert price to the NDX daily close."""
+    logger.info(f"Admin NDX-close reclassify started by {user['username']}")
+    result = await _run_ndx_close_reclassify()
+    if result.get('status') == 'error':
+        raise HTTPException(status_code=500, detail=result.get('message', 'Reclassification failed'))
+    return result
 
 
 @api_router.post("/admin/broadcast")
@@ -2994,6 +2980,36 @@ async def startup():
                 logger.warning(f"Pre-warm (heavy/deferred) failed: {e}")
 
         asyncio.create_task(_deferred_heavy_prewarm())
+
+        # === Daily NDX close reclassification — runs at 1:00 PM Pacific Time ===
+        async def _daily_ndx_scheduler():
+            """Wakes up once per day at 13:00 Pacific (PDT/PST aware) and reclassifies alerts."""
+            import pytz as _pytz
+            pacific = _pytz.timezone('America/Los_Angeles')
+            while True:
+                try:
+                    now_pt = datetime.now(pacific)
+                    target = now_pt.replace(hour=13, minute=0, second=0, microsecond=0)
+                    if now_pt >= target:
+                        # Already past 1 PM today — schedule for tomorrow
+                        target = target + timedelta(days=1)
+                    sleep_secs = (target - now_pt).total_seconds()
+                    logger.info(
+                        f"NDX daily scheduler: next reclassify at "
+                        f"{target.strftime('%Y-%m-%d %H:%M %Z')}, "
+                        f"sleeping {sleep_secs/3600:.1f}h"
+                    )
+                    await asyncio.sleep(sleep_secs)
+                    logger.info("NDX daily scheduler: running auto reclassification...")
+                    result = await _run_ndx_close_reclassify()
+                    logger.info(f"NDX daily scheduler: done — {result.get('message', result)}")
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"NDX daily scheduler error: {e}")
+                    await asyncio.sleep(3600)  # retry in 1 hour on unexpected error
+
+        asyncio.create_task(_daily_ndx_scheduler())
 
         # === Start Discord bot (no-op if DISCORD_BOT_TOKEN not set or DISCORD_BOT_ENABLED=false) ===
         try:

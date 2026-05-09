@@ -35,7 +35,7 @@ interface AuthContextType {
   isLoading: boolean;
   isGuest: boolean;
   serverUrl: string;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   register: (email: string, username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   continueAsGuest: () => void;
@@ -95,14 +95,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string, rememberMe = false) => {
     const controller = withTimeout(TIMEOUT_MS);
     let resp: Response;
     try {
       resp = await fetch(`${DEFAULT_API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, remember_me: rememberMe }),
         signal: controller.signal,
       });
     } catch (e: any) {

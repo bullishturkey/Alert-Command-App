@@ -7,6 +7,7 @@ import { readCache, writeCache, CACHE_KEYS, CACHE_TTL_MS } from '../../utils/dev
 import { useAuth } from '../../contexts/AuthContext';
 import { colors, spacing, radius } from '../../theme';
 import GuestGate from '../../components/GuestGate';
+import { useAppForeground } from '../../hooks/useAppForeground';
 
 interface AlertItem {
   id: string; title: string; message: string; type: string; ticker: string; price: string; source: string; created_by: string; created_at: string; severity?: string;
@@ -65,6 +66,9 @@ export default function AlertsScreen() {
     const i = setInterval(fetchAlerts, 5000);
     return () => clearInterval(i);
   }, [fetchAlerts, isGuest]);
+
+  // Silent refresh when app comes back to foreground
+  useAppForeground(fetchAlerts);
 
   if (isGuest) {
     return (

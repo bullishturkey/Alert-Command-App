@@ -102,9 +102,45 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Build and maintain Alerts Command - a mobile-first trading intelligence platform. Latest work: (1) Discord alert color detection upgraded with keyword fallback (WINNER/LOSER/BUY/SELL/LONG/SHORT/CALL/PUT) in discord_bot.py + reclassify endpoint. (2) Fixed admin refresh-sentiment to route correctly for weekend/after-hours/live market states. (3) Fixed pre-warm to properly store AI cache results based on market state. (4) Login screen UI cleanup: removed subtitle, removed server selector."
+user_problem_statement: "Build and maintain Alerts Command - a mobile-first trading intelligence platform. Latest work: (1) Stay Logged In: Backend login now passes remember_me to create_token (90-day token). Frontend login screen has Stay Logged In checkbox (checked by default). (2) AppState foreground refresh: useAppForeground hook fires silent data refreshes on all 3 tabs when app comes to foreground. (3) Daily auto-reclassify: _daily_ndx_scheduler runs at 1:00 PM Pacific Time daily using pytz timezone awareness."
 
 backend:
+  - task: "Remember Me Login - pass remember_me to create_token"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Fixed login endpoint line 474 to pass data.remember_me to create_token. 90-day TTL when remember_me=true, 7-day default."
+
+  - task: "Daily NDX Auto-Reclassify Scheduler at 1 PM PT"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added _daily_ndx_scheduler() asyncio task in _background_init. Uses pytz America/Los_Angeles for DST awareness. Backend log confirms: NDX daily scheduler: next reclassify at 2026-05-09 13:00 PDT, sleeping 3.3h. Retries on error with 1h sleep."
+
+  - task: "_run_ndx_close_reclassify helper function"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Extracted reclassify logic into shared _run_ndx_close_reclassify(). Admin endpoint now calls this helper. Scheduler also calls this."
+
   - task: "Discord History Import - POST /api/admin/discord/import-history"
     implemented: true
     working: true
@@ -424,6 +460,42 @@ backend:
           comment: "✅ HARD-TIMEOUT FIX VERIFIED via external URL GET /api/ai/sentiment. Claude/Emergent proxy is currently timing out consistently (backend log: 'litellm.Timeout: APITimeoutError - Request timed out' at exactly the 15s mark). Endpoint correctly returns HTTP 200 in 15.5s with fallback sentiment: {overall_sentiment:'neutral', confidence:0, summary:'AI analysis temporarily unavailable. Please try again shortly.'}. Previous behaviour would have hung 3+ minutes (retry storm) — the chat.with_params(timeout=15, num_retries=0) fix is effective. Response shape includes sentiment + generated_at (error-path responses omit ndx_price/ndx_change/news_count, which is acceptable). Warm call also 15.3s because Claude is down so cache never fills — once Claude recovers, cache TTL 15min will keep warm calls <500ms. Cache/stale-while-revalidate code path confirmed via code review (server.py lines 1351-1424). Not a code defect — Claude upstream is intermittently unavailable; our graceful degradation works as designed."
 
 frontend:
+  - task: "Stay Logged In UI toggle on login screen"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/index.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added rememberMe state (default true), Stay Logged In checkbox with green checkmark below Sign In button, passes rememberMe to login(email,pass,rememberMe). Checkbox/checkboxActive/rememberLabel styles added to StyleSheet."
+
+  - task: "useAppForeground hook silently refreshes tabs on foreground"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/hooks/useAppForeground.ts, /app/frontend/app/(tabs)/index.tsx, /app/frontend/app/(tabs)/alerts.tsx, /app/frontend/app/(tabs)/news.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Created useAppForeground.ts hook using AppState.addEventListener. Fires callback on inactive/background→active transition. Wired into all 3 tabs: Markets calls fetchWatchlist+fetchNdx, Alerts calls fetchAlerts, Preflight calls fetchData. Hook uses callbackRef pattern to avoid stale closure."
+
+  - task: "AuthContext login accepts rememberMe parameter"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/contexts/AuthContext.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Updated login function signature to (email, password, rememberMe=false). Now passes remember_me in POST /api/auth/login body."
+
   - task: "Auth Token Key Unification - CRITICAL BUG FIX"
     implemented: true
     working: "NA"
@@ -600,16 +672,20 @@ backend:
 
 test_plan:
   current_focus:
-    - "Discord keyword-based alert color detection"
-    - "Admin refresh-sentiment routes correctly by market state"
-    - "Pre-warm properly caches AI results by market state"
+    - "Remember Me Login - pass remember_me to create_token"
+    - "Daily NDX Auto-Reclassify Scheduler at 1 PM PT"
+    - "_run_ndx_close_reclassify helper function"
+    - "Stay Logged In UI toggle on login screen"
+    - "useAppForeground hook in tabs"
   stuck_tasks: []
   test_all: false
-  test_priority: "high_first"\n\n[1] AI sentiment auth gating — FIXED ✅\n  • GET /api/ai/sentiment without Authorization header → HTTP 401 {'detail':'Not authenticated'} ✅\n  • GET /api/ai/sentiment with admin Bearer token → HTTP 200 with `mode`='daily_recap' ✅\n  • Code change verified at server.py:1739 — now uses Depends(get_current_user).\n\n[2] Admin revoke/restore via POST — FIXED ✅\n  • Registered throwaway user qa_retest_80494250@alertscommand-test.com — got user_id + token.\n  • Baseline: new user's token → GET /preflight → 200 ✅\n  • POST /api/admin/users/{id}/revoke (admin) → 200 {'status':'revoked'} ✅\n  • Revoked user's token → GET /preflight → 403 'Account access has been revoked' ✅\n  • POST /api/admin/users/{id}/restore (admin) → 200 {'status':'restored'} ✅\n  • Restored user's token → GET /preflight → 200 ✅\n  • DELETE /api/admin/users/{id} (admin) → 200 {'status':'deleted'} ✅\n  • Code change verified at server.py:1955 (revoke) and :1969 (restore) — now @api_router.post(...).\n\nBackend logs confirm: 'User revoked: qa_retest... by admin', 'User restored: ...', 'User deleted by admin: ...'. Both previously-failing tasks are now green. No retesting of passing features was done per instructions."
+  test_priority: "high_first"
     - agent: "testing"
       message: "🧪 REVIEW-REQUEST REGRESSION RUN (27/30 passed via /app/backend_test.py against external URL).\n\n❌ CRITICAL FAIL 1 — /api/ai/sentiment auth gating missing:\n  GET /api/ai/sentiment without Bearer token still returns HTTP 200 with full payload (mode='daily_recap', sentiment.overall_sentiment='bullish', etc). Code at server.py:1739 uses Depends(get_optional_user) — must be changed to Depends(get_current_user) to match the review spec. Sibling endpoints /api/preflight (L757) and /api/alerts (L863) are correctly gated and return 401 as expected.\n\n❌ FAIL 2 — Admin revoke/restore method mismatch:\n  Review asked for POST /api/admin/users/{id}/revoke and /restore, but server.py:1955/1969 define them as PUT. POST → 405. Functionality is correct via PUT but clients following the spec will break. Recommend main agent change decorators to @api_router.post(...) OR add POST aliases.\n\n✅ ALL OTHER CHECKS PASS:\n  • /api/preflight, /api/alerts without token → 401 ✅\n  • /api/preflight, /api/alerts, /api/ai/sentiment with admin token → 200 ✅\n  • /api/ai/sentiment `mode` field present, matches US/Eastern time (currently 'daily_recap' — Tue 19:00 ET, after-hours); daily_recap.date_key='2026-04-21', date_label='Apr 21, 2026', indexes=5-entry array ✅\n  • Full revoke/restore/delete flow via PUT: revoked user blocked from /preflight (both old token and freshly re-issued token), restored user regains access, DELETE removes user from /admin/users ✅\n  • Non-admin → GET /admin/users → 403 ✅\n  • GET /preflight authed responded in 0.34s (< 8s), all 18 economic_events have time_utc in exact 'YYYY-MM-DD HH:MM:SS' format with no trailing Z ✅\n\nMain agent: please address the two failures above. Do not re-fix working features."
 
 agent_communication:
+    - agent: "main"
+      message: "🔔 THREE NEW FEATURES IMPLEMENTED AND NEED TESTING: (1) BACKEND - Remember Me JWT: POST /api/auth/login now accepts {email, password, remember_me: bool}. When remember_me=true → issues 90-day token, else 7-day token. Test: login with remember_me=false → decode JWT exp should be ~7 days; login with remember_me=true → decode JWT exp should be ~90 days. (2) BACKEND - Daily NDX Auto-Reclassify: _daily_ndx_scheduler asyncio task starts on server boot. Test: backend log should show 'NDX daily scheduler: next reclassify at YYYY-MM-DD 13:00 PDT, sleeping Xh'. Also test POST /api/admin/reclassify-by-ndx-close still works (uses shared _run_ndx_close_reclassify helper). (3) FRONTEND - Stay Logged In checkbox on login screen: 'Stay logged in for 90 days' appears below Sign In button, checked by default (green), toggleable. When checked, passes remember_me:true in login body. Test credentials: gregrussell90@gmail.com / Liltony2026. Test URL: https://ndx-alerts-backend.preview.emergentagent.com"
     - agent: "testing"
       message: "Completed comprehensive backend API testing for NDX Command Trading Intelligence Platform. All 8 core backend functionalities are working correctly: 1) Auth login with JWT tokens, 2) NDX live market data, 3) Multiple stock quotes, 4) Preflight data with time_utc economic events, 5) Alerts system, 6) Chat channels, 7) Webhook alerts (no auth), 8) JWT authentication protection. All endpoints return 200 with proper data structures. Backend is fully functional and ready for production use."
     - agent: "testing"

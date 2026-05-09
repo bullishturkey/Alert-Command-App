@@ -1,0 +1,55 @@
+{
+  "summary": "Iteration 5: Tested three new features — Stay Logged In (remember_me JWT), AppState foreground refresh, and Daily 1PM PT NDX scheduler. All 8 backend tests pass and all 8 frontend checks verified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_remember_me_and_reclassify.py",
+    "/app/test_reports/pytest/remember_me_reclassify_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "create_token() does NOT include 'iat' in JWT payload — only 'sub', 'is_admin', 'exp'. This is technically fine since PyJWT still validates 'exp', but including 'iat' is best practice (RFC 7519) and helps downstream debugging/inspection.",
+    "useAppForeground hook is correctly attached in all 3 tabs (index.tsx, alerts.tsx, news.tsx). news.tsx only refreshes preflight data on foreground, not AI sentiment — minor, acceptable."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_remember_me_and_reclassify.py"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8 tests pass)",
+    "frontend": "100% (all 8 checklist items pass)"
+  },
+  "seed_data_creation": "One TEST_reclassify_* user created during non-admin reclassify test (registered user).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Stay Logged In fully verified: (1) remember_me=false → ~7-day token, (2) remember_me=true → ~90-day token, (3) token expiry diff matches ~83 days. Admin reclassify-by-ndx-close: 200 with useful response keys (refactored helper still works). NDX scheduler log confirmed: 'NDX daily scheduler: next reclassify at 2026-05-09 13:00 PDT, sleeping 3.3h'. Frontend: checkbox below Sign In button, green and checked by default, toggles on tap, login flow works end-to-end.",
+  "test_results": {
+    "TestRememberMeTokenExpiry": {
+      "test_no_remember_me_returns_7day_token": "PASS — lifespan ~604800s",
+      "test_remember_me_true_returns_90day_token": "PASS — lifespan ~7776000s",
+      "test_remember_me_default_is_false": "PASS — omitting remember_me defaults to 7-day",
+      "test_remember_me_7day_less_than_90day": "PASS — exp diff ~83 days as expected"
+    },
+    "TestAdminReclassifyByNdxClose": {
+      "test_reclassify_requires_auth": "PASS — 401 without auth",
+      "test_reclassify_with_admin_token_succeeds": "PASS — 200 returned",
+      "test_reclassify_response_has_message_or_counts": "PASS — response has useful keys",
+      "test_regular_user_cannot_reclassify": "PASS — 403 for non-admin user"
+    },
+    "FrontendUI": {
+      "checkbox_visible_below_sign_in_button": "PASS — toggle at Y=574, submit at Y=512",
+      "checkbox_checked_green_by_default": "PASS — r-backgroundColor-p5xiek active class confirmed",
+      "checkbox_toggles_on_tap": "PASS — HTML diff confirms active/inactive class toggle",
+      "checkbox_hidden_on_register_tab": "PASS — rememberRow only rendered when isLogin=true",
+      "login_with_checkbox_checked_works": "PASS — dashboard loads, quotes visible, no errors",
+      "ndx_scheduler_log_on_startup": "PASS — 'NDX daily scheduler: next reclassify at 2026-05-09 13:00 PDT' found in backend.err.log"
+    }
+  }
+}

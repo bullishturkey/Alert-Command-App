@@ -7,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { apiFetch, formatPrice } from '../../utils/api';
 import { readCache, writeCache, CACHE_KEYS, CACHE_TTL_MS } from '../../utils/deviceCache';
 import { colors, spacing, radius } from '../../theme';
+import { useAppForeground } from '../../hooks/useAppForeground';
 
 interface Quote {
   symbol: string; name: string; price: number; change: number; changePercent: number;
@@ -98,6 +99,9 @@ export default function DashboardScreen() {
     const i = setInterval(fetchNdx, 5000);
     return () => clearInterval(i);
   }, [fetchNdx, fetchWatchlist]);
+
+  // Silent refresh on foreground — instantly show cached data, fetch new data in background
+  useAppForeground(() => { fetchWatchlist(); fetchNdx(); });
 
   useEffect(() => {
     if (watchlist.length > 0) {
