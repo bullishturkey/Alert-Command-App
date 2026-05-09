@@ -266,9 +266,10 @@ export default function PreflightScreen() {
                         {recap.indexes.map((idx: MoverRow, i: number) => {
                           const isUp = idx.change_pct >= 0;
                           const idxColor = idx.symbol === 'VIX' ? (isUp ? colors.red : colors.green) : (isUp ? colors.green : colors.red);
+                          const displaySym = idx.symbol === 'GSPC' ? 'SP500' : idx.symbol;
                           return (
                             <View key={i} style={st.indexCell}>
-                              <Text style={st.indexSym}>{idx.symbol}</Text>
+                              <Text style={st.indexSym}>{displaySym}</Text>
                               <Text style={[st.indexChg, { color: idxColor }]}>{isUp ? '+' : ''}{idx.change_pct.toFixed(2)}%</Text>
                             </View>
                           );
