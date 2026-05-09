@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiFetch, formatPrice } from '../../utils/api';
+import { readCache, writeCache, CACHE_KEYS, CACHE_TTL_MS } from '../../utils/deviceCache';
 import { colors, spacing, radius } from '../../theme';
 
 interface Quote {
@@ -41,22 +42,54 @@ export default function DashboardScreen() {
   const [newSymbol, setNewSymbol] = useState('');
   const [addingSymbol, setAddingSymbol] = useState(false);
 
+  const [isOffline, setIsOffline] = useState(false);
+  const [cacheAge, setCacheAge] = useState('');
+
+  // ── Cache loader: show last-saved data immediately on mount ──────────────
+  useEffect(() => {
+    (async () => {
+      const [cachedNdx, cachedWatchlist, cachedQuotes] = await Promise.all([
+        readCache<Quote>(CACHE_KEYS.NDX_QUOTE, CACHE_TTL_MS.NDX_QUOTE),
+        readCache<string[]>(CACHE_KEYS.WATCHLIST, CACHE_TTL_MS.WATCHLIST),
+        readCache<Quote[]>(CACHE_KEYS.QUOTES, CACHE_TTL_MS.QUOTES),
+      ]);
+      if (cachedNdx) setNdx(cachedNdx.data);
+      if (cachedWatchlist) setWatchlist(cachedWatchlist.data);
+      if (cachedQuotes) {
+        setQuotes(cachedQuotes.data);
+        setCacheAge(cachedQuotes.ageLabel);
+        setLoading(false); // show cached data, no spinner
+      }
+    })();
+  }, []);
+
   const fetchWatchlist = useCallback(async () => {
-    try { const data = await apiFetch('/api/watchlist'); setWatchlist(data.symbols || []); }
-    catch (e) { console.error('Watchlist fetch error:', e); }
+    try {
+      const data = await apiFetch('/api/watchlist');
+      const syms = data.symbols || [];
+      setWatchlist(syms);
+      writeCache(CACHE_KEYS.WATCHLIST, syms);
+    } catch (e) { console.error('Watchlist fetch error:', e); }
   }, []);
 
   const fetchNdx = useCallback(async () => {
-    try { const data = await apiFetch('/api/market/ndx'); setNdx(data); }
-    catch (e) { console.error('NDX fetch error:', e); }
+    try {
+      const data = await apiFetch('/api/market/ndx');
+      setNdx(data);
+      setIsOffline(false);
+      writeCache(CACHE_KEYS.NDX_QUOTE, data);
+    } catch (e) { console.error('NDX fetch error:', e); setIsOffline(true); }
   }, []);
 
   const fetchQuotes = useCallback(async () => {
     if (watchlist.length === 0) { setLoading(false); setRefreshing(false); return; }
     try {
       const data = await apiFetch(`/api/market/quote-multi?symbols=${watchlist.join(',')}`);
-      setQuotes(data.quotes || []);
-    } catch (e) { console.error('Fetch quotes error:', e); }
+      const qs = data.quotes || [];
+      setQuotes(qs);
+      setIsOffline(false);
+      writeCache(CACHE_KEYS.QUOTES, qs);
+    } catch (e) { console.error('Fetch quotes error:', e); setIsOffline(true); }
     finally { setLoading(false); setRefreshing(false); }
   }, [watchlist]);
 
@@ -205,6 +238,14 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
+      {/* Offline banner */}
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <Ionicons name="cloud-offline-outline" size={13} color="rgba(255,255,255,0.45)" />
+          <Text style={styles.offlineTxt}>Offline — showing saved data{cacheAge ? ` · ${cacheAge}` : ''}</Text>
+        </View>
+      )}
+
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
@@ -306,6 +347,8 @@ export default function DashboardScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
+  offlineBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.04)', paddingHorizontal: 16, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
+  offlineTxt: { color: 'rgba(255,255,255,0.38)', fontSize: 11 },
   loadingContainer: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.xl, paddingTop: spacing.sm, paddingBottom: spacing.md },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },

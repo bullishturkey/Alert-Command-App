@@ -3,6 +3,7 @@ import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator, To
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiFetch, timeAgo } from '../../utils/api';
+import { readCache, writeCache, CACHE_KEYS, CACHE_TTL_MS } from '../../utils/deviceCache';
 import { useAuth } from '../../contexts/AuthContext';
 import { colors, spacing, radius } from '../../theme';
 import GuestGate from '../../components/GuestGate';
@@ -36,14 +37,30 @@ export default function AlertsScreen() {
   const [newType, setNewType] = useState<'bullish' | 'bearish'>('bullish');
   const [sending, setSending] = useState(false);
 
+  const [isOffline, setIsOffline] = useState(false);
+
   const fetchAlerts = useCallback(async () => {
-    try { const d = await apiFetch('/api/alerts'); setAlerts(d.alerts || []); }
-    catch (e) { console.error(e); }
-    finally { setLoading(false); setRefreshing(false); }
+    try {
+      const d = await apiFetch('/api/alerts');
+      const list = d.alerts || [];
+      setAlerts(list);
+      setIsOffline(false);
+      writeCache(CACHE_KEYS.ALERTS, list.slice(0, 50)); // persist last 50
+    } catch (e) {
+      console.error(e);
+      setIsOffline(true);
+    } finally { setLoading(false); setRefreshing(false); }
   }, []);
 
   useEffect(() => {
     if (isGuest) return;
+    // Show cached alerts immediately, then refresh in background
+    readCache<AlertItem[]>(CACHE_KEYS.ALERTS, CACHE_TTL_MS.ALERTS).then(cached => {
+      if (cached && cached.data.length > 0) {
+        setAlerts(cached.data);
+        setLoading(false);
+      }
+    });
     fetchAlerts();
     const i = setInterval(fetchAlerts, 5000);
     return () => clearInterval(i);
@@ -259,6 +276,14 @@ export default function AlertsScreen() {
       {renderModal(false)}
       {renderModal(true)}
 
+      {/* Offline banner */}
+      {isOffline && (
+        <View style={st.offlineBanner}>
+          <Ionicons name="cloud-offline-outline" size={13} color="rgba(255,255,255,0.45)" />
+          <Text style={st.offlineTxt}>Offline — showing last saved alerts</Text>
+        </View>
+      )}
+
       <View style={st.header}>
         <View>
           <View style={st.hRow}><Text style={st.prefix}>⟩</Text><Text style={st.title}>Trade Alerts</Text></View>
@@ -295,6 +320,8 @@ export default function AlertsScreen() {
 }
 
 const st = StyleSheet.create({
+  offlineBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.04)', paddingHorizontal: 20, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
+  offlineTxt: { color: 'rgba(255,255,255,0.38)', fontSize: 11 },
   safe: { flex: 1, backgroundColor: colors.bg },
   ctr: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },

@@ -3,6 +3,7 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, Act
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiFetch, timeAgo } from '../../utils/api';
+import { readCache, writeCache, CACHE_KEYS, CACHE_TTL_MS } from '../../utils/deviceCache';
 import { colors, spacing, radius } from '../../theme';
 import { useAuth } from '../../contexts/AuthContext';
 import GuestGate from '../../components/GuestGate';
@@ -92,12 +93,50 @@ export default function PreflightScreen() {
   const [dailyRecap, setDailyRecap] = useState<any>(null);
   const [ndxPrice, setNdxPrice] = useState<number | null>(null);
   const [ndxChange, setNdxChange] = useState<number | null>(null);
+  const [isOffline, setIsOffline] = useState(false);
   const { user, isGuest } = useAuth();
   const isAdmin = user?.is_admin === true;
 
+  // ── Load device cache on mount — instant display of last-saved data ──────
+  useEffect(() => {
+    if (isGuest) return;
+    (async () => {
+      const [cachedPF, cachedAI] = await Promise.all([
+        readCache<{ events: EconomicEvent[]; earnings: Earning[]; news: NewsItem[] }>(
+          CACHE_KEYS.PREFLIGHT, CACHE_TTL_MS.PREFLIGHT
+        ),
+        readCache<{ sentiment: AISentiment; mode: string; weekly_recap: WeeklyRecap | null; daily_recap: any; ndx_price?: number; ndx_change?: number }>(
+          CACHE_KEYS.AI_SENTIMENT, CACHE_TTL_MS.AI_SENTIMENT
+        ),
+      ]);
+      if (cachedPF) {
+        setEvents(cachedPF.data.events);
+        setEarnings(cachedPF.data.earnings);
+        setNews(cachedPF.data.news);
+        setLoading(false);
+      }
+      if (cachedAI?.data?.sentiment) {
+        setAiSentiment(cachedAI.data.sentiment);
+        setAiMode(cachedAI.data.mode as any || 'live');
+        setWeeklyRecap(cachedAI.data.weekly_recap || null);
+        setDailyRecap(cachedAI.data.daily_recap || null);
+        if (cachedAI.data.ndx_price) setNdxPrice(cachedAI.data.ndx_price);
+        if (cachedAI.data.ndx_change !== undefined) setNdxChange(cachedAI.data.ndx_change);
+      }
+    })();
+  }, [isGuest]);
+
   const fetchData = useCallback(async () => {
-    try { const d = await apiFetch('/api/preflight'); setEvents(d.economic_events || []); setEarnings(d.earnings || []); setNews(d.breaking_news || []); }
-    catch (e) { console.error(e); } finally { setLoading(false); setRefreshing(false); }
+    try {
+      const d = await apiFetch('/api/preflight');
+      const ev = d.economic_events || [];
+      const earn = d.earnings || [];
+      const bn = d.breaking_news || [];
+      setEvents(ev); setEarnings(earn); setNews(bn);
+      setIsOffline(false);
+      writeCache(CACHE_KEYS.PREFLIGHT, { events: ev, earnings: earn, news: bn });
+    } catch (e) { console.error(e); setIsOffline(true); }
+    finally { setLoading(false); setRefreshing(false); }
   }, []);
 
   const fetchAISentiment = useCallback(async () => {
@@ -115,6 +154,17 @@ export default function PreflightScreen() {
       setDailyRecap(data.daily_recap || null);
       if (data.error && !data.sentiment?.summary) {
         setAiError(data.error);
+      }
+      // Persist real (non-placeholder) data to device cache
+      if (!data.pending && data.sentiment?.summary) {
+        writeCache(CACHE_KEYS.AI_SENTIMENT, {
+          sentiment: data.sentiment,
+          mode: data.mode,
+          weekly_recap: data.weekly_recap || null,
+          daily_recap: data.daily_recap || null,
+          ndx_price: data.ndx_price,
+          ndx_change: data.ndx_change,
+        });
       }
       // If backend is still generating, auto-retry after 30s
       if (data.pending) {
@@ -166,6 +216,12 @@ export default function PreflightScreen() {
 
   return (
     <SafeAreaView style={st.safe} edges={['top']}>
+      {isOffline && (
+        <View style={st.offlineBanner}>
+          <Ionicons name="cloud-offline-outline" size={13} color="rgba(255,255,255,0.45)" />
+          <Text style={st.offlineTxt}>Offline — showing saved data</Text>
+        </View>
+      )}
       <FlatList data={[1]} keyExtractor={() => 'pf'}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={colors.green} />}
         showsVerticalScrollIndicator={false}
@@ -495,6 +551,8 @@ export default function PreflightScreen() {
 
 const st = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg }, ctr: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center' },
+  offlineBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.04)', paddingHorizontal: 16, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
+  offlineTxt: { color: 'rgba(255,255,255,0.38)', fontSize: 11 },
   content: { paddingBottom: 30 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },
   hRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
