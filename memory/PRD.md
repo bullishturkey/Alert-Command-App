@@ -47,6 +47,11 @@ Alerts Command is a mobile-first trading intelligence platform designed for a tr
 - ✅ /support page (static) for App Store Connect reviewers
 - ✅ Login screen cleaned up (no subtitle, no server selector)
 
+### Login & Session UX (v3.2 - May 2026)
+- ✅ **Stay Logged In** — "Stay logged in for 90 days" checkbox on login screen (checked by default). When checked, backend issues a 90-day JWT; unchecked = 7-day JWT.
+- ✅ **AppState foreground refresh** — `useAppForeground` hook silently refreshes Markets, Alerts, and Preflight data when app is brought back to foreground (no full reload needed).
+- ✅ **Daily auto-reclassify** — `_daily_ndx_scheduler` asyncio task runs NDX close price reclassification at 1:00 PM Pacific Time daily (pytz DST-aware).
+
 ## Bug Fixes
 - ✅ Preflight timezone conversion (UTC → local time display)
 - ✅ MA indicators hardcoded to 7MA (green) + 21MA (red)
