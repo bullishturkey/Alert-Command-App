@@ -27,16 +27,18 @@ export default function AdminScreen() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [statsData, usersData, discordData, importData] = await Promise.all([
+      // Use allSettled so a single slow/failed call doesn't blow away the whole panel
+      const results = await Promise.allSettled([
         apiFetch('/api/admin/stats'),
         apiFetch('/api/admin/users'),
-        apiFetch('/api/admin/discord/status').catch(() => null),
-        apiFetch('/api/admin/discord/import-status').catch(() => null),
+        apiFetch('/api/admin/discord/status'),
+        apiFetch('/api/admin/discord/import-status'),
       ]);
-      setStats(statsData);
-      setUsers(usersData.users || []);
-      setDiscord(discordData);
-      if (importData) setImportStatus(importData);
+      const [statsRes, usersRes, discordRes, importRes] = results;
+      if (statsRes.status === 'fulfilled') setStats(statsRes.value);
+      if (usersRes.status === 'fulfilled') setUsers(usersRes.value.users || []);
+      if (discordRes.status === 'fulfilled') setDiscord(discordRes.value);
+      if (importRes.status === 'fulfilled') setImportStatus(importRes.value);
     } catch (e) {
       console.error('Admin fetch error:', e);
     } finally {
@@ -303,17 +305,17 @@ export default function AdminScreen() {
 
         {/* NDX Close reclassify — most accurate historical color fix */}
         <TouchableOpacity
-          style={[styles.toolBtn, { borderColor: colors.bull, backgroundColor: 'rgba(0,212,160,0.08)', marginBottom: 16, flexDirection: 'row', gap: 10, paddingVertical: 14 }, reclassifyingNdx && { opacity: 0.6 }]}
+          style={[styles.toolBtn, { borderColor: '#FF9500', backgroundColor: 'rgba(255,149,0,0.08)', marginBottom: 16, flexDirection: 'row', gap: 10, paddingVertical: 14 }, reclassifyingNdx && { opacity: 0.6 }]}
           onPress={reclassifyByNdxClose}
           disabled={reclassifyingNdx}
         >
           {reclassifyingNdx
-            ? <><ActivityIndicator color={colors.bull} size="small" /><Text style={[styles.toolBtnTxt, { color: colors.bull }]}>Fetching NDX data &amp; updating...</Text></>
+            ? <><ActivityIndicator color="#FF9500" size="small" /><Text style={[styles.toolBtnTxt, { color: '#FF9500' }]}>Fetching NDX data &amp; updating...</Text></>
             : <>
-                <Ionicons name="analytics-outline" size={18} color={colors.bull} />
-                <Text style={[styles.toolBtnTxt, { color: colors.bull, textAlign: 'left' }]}>
+                <Ionicons name="analytics-outline" size={18} color="#FF9500" />
+                <Text style={[styles.toolBtnTxt, { color: '#FF9500', textAlign: 'left' }]}>
                   Reclassify by NDX Daily Close{'\n'}
-                  <Text style={{ fontSize: 11, opacity: 0.7 }}>Green if close &gt; alert price · Red if close &lt; alert price</Text>
+                  <Text style={{ fontSize: 11, opacity: 0.85, color: '#FF9500' }}>Green if close &gt; alert price · Red if close &lt; alert price</Text>
                 </Text>
               </>
           }
@@ -323,15 +325,15 @@ export default function AdminScreen() {
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
             <Text style={styles.statValue}>{stats.users}</Text>
-            <Text style={styles.statLabel}>Users</Text>
+            <Text style={styles.statLabel} numberOfLines={1} adjustsFontSizeToFit>Users</Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statValue}>{stats.alerts}</Text>
-            <Text style={styles.statLabel}>Alerts</Text>
+            <Text style={styles.statLabel} numberOfLines={1} adjustsFontSizeToFit>Alerts</Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statValue}>{stats.messages}</Text>
-            <Text style={styles.statLabel}>Messages</Text>
+            <Text style={styles.statLabel} numberOfLines={1} adjustsFontSizeToFit>Messages</Text>
           </View>
         </View>
 

@@ -96,15 +96,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const login = useCallback(async (email: string, password: string, rememberMe = false) => {
-    const controller = withTimeout(TIMEOUT_MS);
-    let resp: Response;
-    try {
-      resp = await fetch(`${DEFAULT_API_URL}/api/auth/login`, {
+    const attemptLogin = async (): Promise<Response> => {
+      const controller = withTimeout(TIMEOUT_MS);
+      return fetch(`${DEFAULT_API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, remember_me: rememberMe }),
         signal: controller.signal,
       });
+    };
+
+    let resp: Response;
+    try {
+      resp = await attemptLogin();
+      // If first attempt fails with 401, retry once after a short delay.
+      // Handles cold-start race conditions (e.g. stale Mongo connection after
+      // app was swipe-closed for a while) where the second attempt succeeds.
+      if (resp.status === 401) {
+        await new Promise((r) => setTimeout(r, 1500));
+        try {
+          resp = await attemptLogin();
+        } catch {
+          // If retry throws, keep the original response and let normal error flow handle it
+        }
+      }
     } catch (e: any) {
       if (e?.name === 'AbortError') {
         throw new Error('Server is taking too long to respond. Please try again.');
