@@ -20,8 +20,8 @@ const alertColor = (type: string) => isBearish(type) ? colors.red : isBullish(ty
 const alertBg = (type: string) => isBearish(type) ? colors.redBg : isBullish(type) ? colors.greenBg : colors.yellowBg;
 const alertBorderColor = (type: string) =>
   isBearish(type) ? 'rgba(245,70,107,0.15)' : isBullish(type) ? 'rgba(0,212,160,0.15)' : 'rgba(255,214,10,0.15)';
-const alertLabel = (type: string) => isBearish(type) ? 'LOSER' : isBullish(type) ? 'WINNER' : 'SIGNAL';
-const alertIcon = (type: string): any => isBearish(type) ? 'trending-down' : isBullish(type) ? 'trending-up' : 'flash';
+const alertLabel = (type: string) => isBearish(type) ? 'LOSER' : isBullish(type) ? 'WINNER' : 'BREAKEVEN';
+const alertIcon = (type: string): any => isBearish(type) ? 'trending-down' : isBullish(type) ? 'trending-up' : 'remove';
 
 export default function AlertsScreen() {
   const { user, isGuest } = useAuth();
@@ -35,7 +35,7 @@ export default function AlertsScreen() {
   const [newTitle, setNewTitle] = useState('');
   const [newMsg, setNewMsg] = useState('');
   const [newTicker, setNewTicker] = useState('NDX');
-  const [newType, setNewType] = useState<'bullish' | 'bearish'>('bullish');
+  const [newType, setNewType] = useState<'bullish' | 'bearish' | 'signal'>('bullish');
   const [sending, setSending] = useState(false);
 
   const [isOffline, setIsOffline] = useState(false);
@@ -134,12 +134,25 @@ export default function AlertsScreen() {
     setNewTitle(alert.title);
     setNewMsg(alert.message);
     setNewTicker(alert.ticker || 'NDX');
-    setNewType(isBearish(alert.type) ? 'bearish' : 'bullish');
+    setNewType(isBearish(alert.type) ? 'bearish' : isBullish(alert.type) ? 'bullish' : 'signal');
     setShowEdit(true);
   };
 
   const resetForm = () => {
     setNewTitle(''); setNewMsg(''); setNewTicker('NDX'); setNewType('bullish');
+  };
+
+  const formatAlertDate = (iso: string): string => {
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      const now = new Date();
+      const sameDay = d.toDateString() === now.toDateString();
+      const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      if (sameDay) return time;
+      const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      return `${date} · ${time}`;
+    } catch { return ''; }
   };
 
   const renderAlert = ({ item, index }: { item: AlertItem; index: number }) => {
@@ -149,6 +162,7 @@ export default function AlertsScreen() {
     const accentBorder = alertBorderColor(item.type);
     const label = alertLabel(item.type);
     const icon = alertIcon(item.type);
+    const dateStamp = formatAlertDate(item.created_at);
 
     return (
       <View style={[st.card, { borderLeftColor: accentColor, borderColor: newest ? accentBorder : colors.border }]}>
@@ -157,7 +171,10 @@ export default function AlertsScreen() {
             <Ionicons name={icon} size={11} color={accentColor} />
             <Text style={[st.sigTxt, { color: accentColor }]}>{label}</Text>
           </View>
-          <Text style={st.cardTime}>{timeAgo(item.created_at)}</Text>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={st.cardTime}>{timeAgo(item.created_at)}</Text>
+            {dateStamp ? <Text style={st.cardDate}>{dateStamp}</Text> : null}
+          </View>
         </View>
         <View style={st.priceRow}>
           <Text style={st.ndxL}>{item.ticker || 'NDX'}</Text>
@@ -210,7 +227,7 @@ export default function AlertsScreen() {
               <Text style={st.modalSub}>{isEdit ? 'Update alert details' : 'Push to all registered devices'}</Text>
               <ScrollView keyboardShouldPersistTaps="handled">
 
-                {/* WIN / LOSS toggle — always visible */}
+                {/* WIN / LOSS / BREAKEVEN toggle — always visible */}
                 <Text style={st.fieldLabel}>TYPE</Text>
                 <View style={st.typeRow}>
                   <TouchableOpacity
@@ -219,6 +236,13 @@ export default function AlertsScreen() {
                   >
                     <Ionicons name="trending-up" size={14} color={newType === 'bullish' ? colors.green : colors.textMuted} />
                     <Text style={[st.typeTxt, newType === 'bullish' && st.typeTxtWin]}>WINNER</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[st.typeBtn, newType === 'signal' && st.typeBtnBE]}
+                    onPress={() => setNewType('signal')}
+                  >
+                    <Ionicons name="remove" size={14} color={newType === 'signal' ? colors.yellow : colors.textMuted} />
+                    <Text style={[st.typeTxt, newType === 'signal' && st.typeTxtBE]}>BREAKEVEN</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[st.typeBtn, newType === 'bearish' && st.typeBtnLoss]}
@@ -336,6 +360,7 @@ const st = StyleSheet.create({
   sigBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 100 },
   sigTxt: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
   cardTime: { color: colors.textMuted, fontSize: 11 },
+  cardDate: { color: colors.textTertiary, fontSize: 10, marginTop: 1 },
   priceRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 8 },
   ndxL: { color: colors.textSecondary, fontSize: 15, fontWeight: '700' },
   at: { color: colors.textMuted, fontSize: 13 },
@@ -359,14 +384,16 @@ const st = StyleSheet.create({
   modalSub: { color: colors.textTertiary, fontSize: 12, marginBottom: 16 },
   fieldLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 0.3, marginBottom: 6, marginTop: 12 },
   modalInput: { backgroundColor: colors.bg, borderRadius: 8, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 12, color: '#fff', fontSize: 15 },
-  // WIN / LOSS type toggle
-  typeRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  typeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border },
+  // WIN / LOSS / BREAKEVEN type toggle
+  typeRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  typeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 12, paddingHorizontal: 4, borderRadius: 10, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border },
   typeBtnWin: { backgroundColor: colors.greenBg, borderColor: colors.green },
   typeBtnLoss: { backgroundColor: colors.redBg, borderColor: colors.red },
-  typeTxt: { color: colors.textMuted, fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+  typeBtnBE: { backgroundColor: colors.yellowBg, borderColor: colors.yellow },
+  typeTxt: { color: colors.textMuted, fontSize: 10.5, fontWeight: '800', letterSpacing: 0.4 },
   typeTxtWin: { color: colors.green },
   typeTxtLoss: { color: colors.red },
+  typeTxtBE: { color: colors.yellow },
   modalActions: { flexDirection: 'row', gap: 12, marginTop: 20 },
   modalCancel: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: colors.surfaceHover, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
   modalCancelTxt: { color: colors.textSecondary, fontSize: 15, fontWeight: '600' },

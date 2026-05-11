@@ -66,11 +66,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const saved = await AsyncStorage.getItem(TOKEN_KEY);
       const guestMode = await AsyncStorage.getItem(GUEST_KEY);
       if (saved) {
-        const controller = withTimeout(TIMEOUT_MS);
-        const resp = await fetch(`${apiUrl}/api/auth/me`, {
-          headers: { Authorization: `Bearer ${saved}` },
-          signal: controller.signal,
-        }).catch(() => null);
+        // Verify token — with ONE silent retry to handle cold-start race conditions
+        // where the backend Mongo connection takes a beat to re-establish.
+        const verify = async (): Promise<Response | null> => {
+          const controller = withTimeout(TIMEOUT_MS);
+          return fetch(`${apiUrl}/api/auth/me`, {
+            headers: { Authorization: `Bearer ${saved}` },
+            signal: controller.signal,
+          }).catch(() => null);
+        };
+
+        let resp = await verify();
+        // If the first verify returned 401/403, give the backend a moment and try once more.
+        if (resp && (resp.status === 401 || resp.status === 403)) {
+          await new Promise((r) => setTimeout(r, 1500));
+          const retry = await verify();
+          if (retry) resp = retry;
+        }
 
         if (resp?.ok) {
           // Token is valid — restore session
@@ -78,7 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(data.user);
           setToken(saved);
         } else if (resp !== null && (resp.status === 401 || resp.status === 403)) {
-          // Server explicitly rejected the token — it is expired or revoked
+          // Server explicitly rejected the token twice — it is expired or revoked
           await AsyncStorage.removeItem(TOKEN_KEY);
           if (guestMode === 'true') setIsGuest(true);
         }

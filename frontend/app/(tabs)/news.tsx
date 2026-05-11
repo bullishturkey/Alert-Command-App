@@ -167,9 +167,9 @@ export default function PreflightScreen() {
           ndx_change: data.ndx_change,
         });
       }
-      // If backend is still generating, auto-retry after 30s
+      // If backend is still generating, auto-retry after 15s
       if (data.pending) {
-        setTimeout(() => fetchAISentiment(), 30000);
+        setTimeout(() => fetchAISentiment(), 15000);
       }
     } catch (e: any) {
       // On timeout/network error, retry once after 20s before showing error

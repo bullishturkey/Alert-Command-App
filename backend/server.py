@@ -1177,8 +1177,8 @@ async def webhook_alert(
     logger.info(f"Webhook alert received: {title}")
     
     # Send push notifications with formatted title (emoji + ticker + type + price)
-    type_emoji = {'bullish': '🟢', 'bearish': '🔴', 'signal': '⚡'}.get(alert['type'], '⚡')
-    type_label = {'bullish': 'Bullish', 'bearish': 'Bearish', 'signal': 'Signal'}.get(alert['type'], 'Signal')
+    type_emoji = {'bullish': '🟢', 'bearish': '🔴', 'signal': '🟡'}.get(alert['type'], '🟡')
+    type_label = {'bullish': 'Winner', 'bearish': 'Loser', 'signal': 'Breakeven'}.get(alert['type'], 'Breakeven')
     price_part = f" — ${price}" if price else ''
     push_title = f"{type_emoji} {alert['ticker']} {type_label}{price_part}".strip()
     await send_push_notifications(push_title, content or title, alert['id'])
@@ -1189,11 +1189,12 @@ async def webhook_alert(
 # PUSH NOTIFICATION ENDPOINTS
 # =====================
 async def send_push_notifications(title: str, body: str, alert_id: str = ''):
-    """Send push notifications to all registered devices via Expo"""
+    """Send push notifications to all registered devices via Expo (non-blocking)."""
     try:
         from exponent_server_sdk import PushClient, PushMessage, PushServerError
         tokens = await db.push_tokens.find({}, {'_id': 0, 'token': 1}).to_list(1000)
         if not tokens:
+            logger.info(f"Push: no registered devices — skipping alert {alert_id}")
             return
         messages = []
         for doc in tokens:
@@ -1208,15 +1209,20 @@ async def send_push_notifications(title: str, body: str, alert_id: str = ''):
                 sound='default',
                 priority='high',
             ))
-        if messages:
-            client = PushClient()
-            try:
-                responses = client.publish_multiple(messages)
-                logger.info(f"Push notifications sent: {len(responses)} devices")
-            except PushServerError as e:
-                logger.error(f"Push server error: {e}")
-            except Exception as e:
-                logger.error(f"Push send error: {e}")
+        if not messages:
+            return
+        # PushClient.publish_multiple does blocking HTTP — run in a worker thread
+        # to avoid stalling the asyncio event loop.
+        def _publish():
+            return PushClient().publish_multiple(messages)
+        try:
+            loop = asyncio.get_event_loop()
+            responses = await loop.run_in_executor(None, _publish)
+            logger.info(f"Push: sent to {len(responses)} device(s) for alert {alert_id} — title='{title}'")
+        except PushServerError as e:
+            logger.error(f"Push server error: {e}")
+        except Exception as e:
+            logger.error(f"Push send error: {e}")
     except ImportError:
         logger.warning("exponent_server_sdk not installed, skipping push")
     except Exception as e:
@@ -2098,9 +2104,11 @@ async def get_ai_sentiment(user=Depends(get_current_user)):
                     if day_key in _daily_recap_cache:
                         return
                     result = await _generate_daily_recap()
-                    if result.get('daily_recap', {}).get('indexes') or result.get('daily_recap', {}).get('top_gainers'):
-                        _daily_recap_cache[day_key] = result
-                        logger.info(f"Daily recap background-generated for {day_key}")
+                    # Always cache the result to prevent placeholder loop, even if movers data is partially empty.
+                    # Sentiment summary is still useful on its own; users can pull-to-refresh later.
+                    _daily_recap_cache[day_key] = result
+                    has_data = bool(result.get('daily_recap', {}).get('indexes') or result.get('daily_recap', {}).get('top_gainers'))
+                    logger.info(f"Daily recap background-generated for {day_key} (has_movers={has_data})")
             except Exception as e:
                 logger.error(f"Daily recap background generation failed: {e}")
         asyncio.create_task(_gen_daily_bg())
@@ -3035,9 +3043,9 @@ async def startup():
                 }
                 await db.alerts.insert_one(alert)
                 try:
-                    # Build a clean push title: "🟢 AAPL Bullish Signal — $172.50"
-                    type_emoji = {'bullish': '🟢', 'bearish': '🔴', 'signal': '⚡'}.get(alert['type'], '⚡')
-                    type_label = {'bullish': 'Bullish', 'bearish': 'Bearish', 'signal': 'Signal'}.get(alert['type'], 'Signal')
+                    # Build a clean push title: "🟢 AAPL Winner — $172.50"
+                    type_emoji = {'bullish': '🟢', 'bearish': '🔴', 'signal': '🟡'}.get(alert['type'], '🟡')
+                    type_label = {'bullish': 'Winner', 'bearish': 'Loser', 'signal': 'Breakeven'}.get(alert['type'], 'Breakeven')
                     ticker_part = alert['ticker'] or ''
                     price_part = f" — ${alert['price']}" if alert.get('price') else ''
                     push_title = f"{type_emoji} {ticker_part} {type_label}{price_part}".strip()
