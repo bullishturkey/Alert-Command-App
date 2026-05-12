@@ -80,3 +80,12 @@ agenthub/agents/youtube/db
 android-sdk/ 
 # Sensitive credential files
 memory/test_credentials.md
+-e 
+# Environment and credential files
+.env
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
