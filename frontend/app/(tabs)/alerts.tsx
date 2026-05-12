@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, TextInput, Modal, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity, TextInput, Modal, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { apiFetch, timeAgo } from '../../utils/api';
@@ -46,7 +47,7 @@ export default function AlertsScreen() {
       const list = d.alerts || [];
       setAlerts(list);
       setIsOffline(false);
-      writeCache(CACHE_KEYS.ALERTS, list.slice(0, 50)); // persist last 50
+      writeCache(CACHE_KEYS.ALERTS, list.slice(0, 200)); // persist last 200
     } catch (e) {
       console.error(e);
       setIsOffline(true);
@@ -81,8 +82,15 @@ export default function AlertsScreen() {
   }
 
   const deleteAlert = async (id: string) => {
-    try { await apiFetch(`/api/alerts/${id}`, { method: 'DELETE' }); fetchAlerts(); }
-    catch (e: any) { Alert.alert('Error', e.message || 'Failed to delete'); }
+    // Optimistic: remove from UI immediately. Restore on error.
+    const prev = alerts;
+    setAlerts(alerts.filter(a => a.id !== id));
+    try {
+      await apiFetch(`/api/alerts/${id}`, { method: 'DELETE' });
+    } catch (e: any) {
+      setAlerts(prev); // rollback
+      Alert.alert('Error', e.message || 'Failed to delete');
+    }
   };
 
   const confirmDelete = (a: AlertItem) => {
@@ -320,7 +328,7 @@ export default function AlertsScreen() {
         </View>
       </View>
 
-      <FlatList
+      <FlashList
         data={alerts}
         keyExtractor={i => i.id}
         renderItem={renderAlert}

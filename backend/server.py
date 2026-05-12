@@ -143,6 +143,16 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode(), hashed.encode())
 
+async def hash_password_async(password: str) -> str:
+    """Run bcrypt.hashpw in a thread executor so it doesn't block the asyncio loop."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, hash_password, password)
+
+async def verify_password_async(password: str, hashed: str) -> bool:
+    """Run bcrypt.checkpw in a thread executor so it doesn't block the asyncio loop."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, verify_password, password, hashed)
+
 def create_token(user_id: str, is_admin: bool, remember_me: bool = False) -> str:
     days = 90 if remember_me else 7  # 90-day "stay logged in" vs 7-day standard
     payload = {
@@ -469,7 +479,7 @@ async def register(data: UserRegister):
 @api_router.post("/auth/login")
 async def login(data: UserLogin):
     user = await db.users.find_one({'email': data.email}, {'_id': 0})
-    if not user or not verify_password(data.password, user['password_hash']):
+    if not user or not await verify_password_async(data.password, user['password_hash']):
         raise HTTPException(status_code=401, detail='Invalid credentials')
     token = create_token(user['id'], user.get('is_admin', False), data.remember_me)
     return {
@@ -1753,7 +1763,7 @@ Respond ONLY with valid JSON in this exact format:
 Be direct, professional, trading-focused. No disclaimers."""
     )
     chat.with_model("anthropic", "claude-4-sonnet-20250514")
-    chat.with_params(timeout=15, num_retries=0)
+    chat.with_params(timeout=25, num_retries=0)
 
     user_msg = UserMessage(text=f"""Weekly market recap — produce JSON analysis.
 
@@ -1863,7 +1873,7 @@ Respond ONLY with valid JSON in this exact format:
 Be direct, professional, trading-focused. No disclaimers."""
     )
     chat.with_model("anthropic", "claude-4-sonnet-20250514")
-    chat.with_params(timeout=15, num_retries=0)
+    chat.with_params(timeout=25, num_retries=0)
 
     user_msg = UserMessage(text=f"""Post-close recap for {today_key} — produce JSON analysis.
 
@@ -1975,9 +1985,8 @@ IMPORTANT: Respond ONLY with valid JSON in this exact format:
 Be direct, professional, and trading-focused. No disclaimers or caveats."""
     )
     chat.with_model("anthropic", "claude-4-sonnet-20250514")
-    # Tight timeout + no retries at litellm level (the underlying sync call blocks the
-    # event loop, so our outer asyncio.wait_for won't cancel it — must be enforced here).
-    chat.with_params(timeout=15, num_retries=0)
+    # Raised to 25s timeout with launch-tier RAM headroom.
+    chat.with_params(timeout=25, num_retries=0)
 
     user_message = UserMessage(
         text=f"""Analyze the following market data and news for the NDX trading community:
@@ -2637,6 +2646,18 @@ async def get_discord_import_status(user=Depends(get_admin_user)):
 app.include_router(api_router)
 app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+# Lightweight request-timing middleware — logs only slow requests (>1s) to avoid noise.
+@app.middleware("http")
+async def _timing_middleware(request, call_next):
+    import time as _t
+    start = _t.time()
+    response = await call_next(request)
+    dur_ms = (_t.time() - start) * 1000
+    if dur_ms > 1000:
+        logger.warning(f"SLOW {request.method} {request.url.path} → {response.status_code} in {dur_ms:.0f}ms")
+    response.headers["X-Response-Time-ms"] = f"{dur_ms:.0f}"
+    return response
+
 # =====================
 # LEGAL PAGES (Public)
 # =====================
@@ -2861,14 +2882,19 @@ async def startup():
         # === Create DB indexes (idempotent — fast if already exist) ===
         try:
             await db.users.create_index("email", unique=True)
+            await db.users.create_index("id", unique=True)
             await db.alerts.create_index([("created_at", -1)])
             await db.alerts.create_index("source")
             await db.alerts.create_index("ticker")
+            await db.alerts.create_index("type")
+            await db.alerts.create_index("id", unique=True)
+            await db.alerts.create_index([("type", 1), ("created_at", -1)])  # compound for filtered lists
             await db.channels.create_index("slug", unique=True)
             await db.watchlist.create_index("user_id")
             await db.push_tokens.create_index("token", unique=True)
+            await db.push_tokens.create_index("user_id")
             await db.messages.create_index([("channel_id", 1), ("created_at", -1)])
-            logger.info("DB indexes ensured")
+            logger.info("DB indexes ensured (10 indexes)")
         except Exception as e:
             logger.error(f"Index creation issue: {e}")
 
@@ -2960,10 +2986,11 @@ async def startup():
         except Exception as e:
             logger.warning(f"Pre-warm (fast) failed: {e}")
 
-        # Heavy pre-warm deferred — runs 90s after startup to keep baseline RAM low
+        # Heavy pre-warm — runs 30s after startup (was 90s; reduced now we have launch-tier RAM)
         async def _deferred_heavy_prewarm():
             import gc, time as _prewarm_t
-            await asyncio.sleep(90)
+            global _ai_sentiment_cache, _ai_sentiment_cache_time
+            await asyncio.sleep(30)
             try:
                 logger.info("Pre-warm: starting deferred heavy caches (yfinance + AI)...")
                 await _fetch_recent_earnings(days_back=14)
@@ -2974,21 +3001,19 @@ async def startup():
                     wk = _current_iso_week_key()
                     if wk not in _weekly_recap_cache:
                         res = await _generate_weekly_recap()
-                        if res.get('weekly_recap', {}).get('indexes') or res.get('weekly_recap', {}).get('top_gainers'):
-                            _weekly_recap_cache[wk] = res
-                            logger.info(f"Pre-warm: weekly recap cached for {wk}")
+                        _weekly_recap_cache[wk] = res
+                        logger.info(f"Pre-warm: weekly recap cached for {wk}")
                 elif prewarm_state == 'after_hours':
                     dk = _current_trading_day_key()
                     if dk not in _daily_recap_cache:
                         res = await _generate_daily_recap()
-                        if res.get('daily_recap', {}).get('indexes') or res.get('daily_recap', {}).get('top_gainers'):
-                            _daily_recap_cache[dk] = res
-                            logger.info(f"Pre-warm: daily recap cached for {dk}")
+                        _daily_recap_cache[dk] = res
+                        logger.info(f"Pre-warm: daily recap cached for {dk}")
                 else:
                     # Live hours — populate the live sentiment cache
                     res = await _generate_ai_sentiment()
                     if res.get('sentiment'):
-                        _ai_sentiment_cache.update(res)
+                        _ai_sentiment_cache = res
                         _ai_sentiment_cache_time = _prewarm_t.time()
                         logger.info("Pre-warm: live sentiment cached")
                 gc.collect()
@@ -2997,6 +3022,34 @@ async def startup():
                 logger.warning(f"Pre-warm (heavy/deferred) failed: {e}")
 
         asyncio.create_task(_deferred_heavy_prewarm())
+
+        # === Auto-refresh AI sentiment every 5 min during market hours ===
+        # Keeps the cache always-fresh so users never see stale or "loading…" placeholders.
+        async def _ai_sentiment_keepalive():
+            global _ai_sentiment_cache, _ai_sentiment_cache_time
+            import time as _kt
+            await asyncio.sleep(120)  # let the initial pre-warm finish first
+            while True:
+                try:
+                    state = _market_state()
+                    if state == 'open':
+                        # Force fresh AI sentiment every 5 minutes during regular trading hours
+                        result = await _generate_ai_sentiment()
+                        if result.get('sentiment'):
+                            _ai_sentiment_cache = result
+                            _ai_sentiment_cache_time = _kt.time()
+                            logger.info("AI keepalive: live sentiment refreshed (5-min loop)")
+                        await asyncio.sleep(300)  # 5 min
+                    else:
+                        # Outside market hours, recheck every 10 min
+                        await asyncio.sleep(600)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.warning(f"AI keepalive error: {e}")
+                    await asyncio.sleep(300)
+
+        asyncio.create_task(_ai_sentiment_keepalive())
 
         # === Daily NDX close reclassification — runs at 1:00 PM Pacific Time ===
         async def _daily_ndx_scheduler():

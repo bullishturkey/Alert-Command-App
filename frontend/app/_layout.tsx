@@ -5,6 +5,7 @@ import { View, StyleSheet, ActivityIndicator, Image, Platform } from 'react-nati
 import { useEffect } from 'react';
 import { colors } from '../theme';
 import { useNotifications } from '../hooks/useNotifications';
+import { useLaunchPrefetch } from '../hooks/useLaunchPrefetch';
 
 // Global locale fix for web - must run before any Intl usage
 if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -46,6 +47,9 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 
   // Register for push notifications when authenticated (not guest)
   useNotifications(!!user);
+
+  // Prefetch all critical endpoints in parallel as soon as user is authenticated
+  useLaunchPrefetch(!!user);
 
   useEffect(() => {
     if (isLoading) return;

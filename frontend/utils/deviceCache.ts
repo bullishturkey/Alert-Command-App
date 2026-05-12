@@ -17,14 +17,17 @@ export const CACHE_KEYS = {
   AI_SENTIMENT: 'cache_v1_ai_sentiment',
 } as const;
 
-/** How long cached data is considered "fresh" before we show a stale indicator */
+/** How long cached data is considered "fresh" before we show a stale indicator.
+ * Note: cache is ALWAYS used immediately on app launch (stale-while-revalidate);
+ * these TTLs only control when we show a "stale" indicator in the UI.
+ * Backend is aggressively pre-warmed on the launch tier, so TTLs can be longer. */
 export const CACHE_TTL_MS = {
-  NDX_QUOTE:    60_000,           // 60 seconds
-  QUOTES:       60_000,           // 60 seconds
-  WATCHLIST:    30 * 60_000,      // 30 minutes
-  ALERTS:       5  * 60_000,      // 5 minutes
-  PREFLIGHT:    30 * 60_000,      // 30 minutes
-  AI_SENTIMENT: 8  * 3_600_000,   // 8 hours
+  NDX_QUOTE:    2  * 60_000,      // 2 minutes
+  QUOTES:       2  * 60_000,      // 2 minutes
+  WATCHLIST:    24 * 3_600_000,   // 24 hours (rarely changes)
+  ALERTS:       10 * 60_000,      // 10 minutes
+  PREFLIGHT:    60 * 60_000,      // 1 hour
+  AI_SENTIMENT: 12 * 3_600_000,   // 12 hours
 } as const;
 
 interface CacheEntry<T> {
