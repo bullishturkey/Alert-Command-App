@@ -1991,25 +1991,30 @@ BREAKING NEWS:
 Provide your JSON analysis."""
     )
 
+    # Default fallback sentiment — used if Claude fails / times out so we still cache SOMETHING
+    sentiment_data: Dict[str, Any] = {
+        'overall_sentiment': 'neutral',
+        'confidence': 0,
+        'summary': f"Live market data is up — AI commentary is temporarily unavailable. NDX is at ${ndx_quote.get('price', 'N/A') if ndx_quote else 'N/A'}.",
+        'key_drivers': [],
+        'ndx_outlook': '',
+        'risk_factors': [],
+        'trade_bias': '',
+    }
     # Hard 20s timeout so a slow Claude response can never hang the endpoint
-    response = await asyncio.wait_for(chat.send_message(user_message), timeout=20.0)
-
-    # Parse the JSON response
     try:
-        resp_text = response.strip()
-        if resp_text.startswith('```'):
-            resp_text = resp_text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
-        sentiment_data = json.loads(resp_text)
-    except json.JSONDecodeError:
-        sentiment_data = {
-            'overall_sentiment': 'neutral',
-            'confidence': 5,
-            'summary': response[:300] if response else 'Analysis unavailable',
-            'key_drivers': [],
-            'ndx_outlook': '',
-            'risk_factors': [],
-            'trade_bias': ''
-        }
+        response = await asyncio.wait_for(chat.send_message(user_message), timeout=20.0)
+        try:
+            resp_text = response.strip()
+            if resp_text.startswith('```'):
+                resp_text = resp_text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
+            sentiment_data = json.loads(resp_text)
+        except json.JSONDecodeError:
+            sentiment_data['summary'] = response[:300] if response else sentiment_data['summary']
+    except asyncio.TimeoutError:
+        logger.warning("AI sentiment: Claude timed out (>20s) — returning movers-only fallback")
+    except Exception as e:
+        logger.warning(f"AI sentiment: Claude call failed ({e}) — returning movers-only fallback")
 
     return {
         'sentiment': sentiment_data,
@@ -3022,6 +3027,63 @@ async def startup():
                     await asyncio.sleep(3600)  # retry in 1 hour on unexpected error
 
         asyncio.create_task(_daily_ndx_scheduler())
+
+        # === Market-Open scheduler — runs at 9:30 AM ET on weekdays ===
+        # Pre-warms the AI sentiment cache and pushes a "Market Open" notification
+        # to every registered device so traders get an instant intraday brief.
+        async def _market_open_scheduler():
+            import pytz as _pytz
+            eastern = _pytz.timezone('America/New_York')
+            while True:
+                try:
+                    now_et = datetime.now(eastern)
+                    target = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+                    # If already past 9:30 today OR it's a weekend, schedule for next weekday
+                    if now_et >= target:
+                        target = target + timedelta(days=1)
+                    # Skip Sat (5) / Sun (6) — roll forward to Monday
+                    while target.weekday() >= 5:
+                        target = target + timedelta(days=1)
+                    sleep_secs = (target - now_et).total_seconds()
+                    logger.info(
+                        f"Market-open scheduler: next run at "
+                        f"{target.strftime('%Y-%m-%d %H:%M %Z')}, "
+                        f"sleeping {sleep_secs/3600:.1f}h"
+                    )
+                    await asyncio.sleep(sleep_secs)
+                    logger.info("Market-open scheduler: generating fresh AI sentiment + sending push...")
+                    # 1) Force-regenerate AI sentiment so the cache is hot for everyone
+                    global _ai_sentiment_cache, _ai_sentiment_cache_time
+                    import time as _time
+                    try:
+                        result = await _generate_ai_sentiment()
+                        _ai_sentiment_cache = result
+                        _ai_sentiment_cache_time = _time.time()
+                        logger.info("Market-open: AI sentiment refreshed")
+                    except Exception as e:
+                        logger.warning(f"Market-open AI refresh failed: {e}")
+                        result = {'sentiment': {'overall_sentiment': 'neutral', 'summary': 'Market is now open — pull down on Preflight for the latest AI brief.'}}
+
+                    # 2) Push to every registered device
+                    sentiment = (result or {}).get('sentiment') or {}
+                    bias = (sentiment.get('overall_sentiment') or 'neutral').lower()
+                    emoji = {'bullish': '🟢', 'bearish': '🔴'}.get(bias, '🔔')
+                    ndx_price = result.get('ndx_price') if result else None
+                    price_part = f" — NDX ${ndx_price:.2f}" if isinstance(ndx_price, (int, float)) else ''
+                    push_title = f"{emoji} Market Open{price_part}"
+                    push_body = (sentiment.get('summary') or "Markets are now open. Tap to view the latest AI brief.")[:200]
+                    try:
+                        await send_push_notifications(push_title, push_body, 'market-open')
+                        logger.info("Market-open: push notification dispatched")
+                    except Exception as e:
+                        logger.error(f"Market-open push failed: {e}")
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"Market-open scheduler error: {e}")
+                    await asyncio.sleep(3600)
+
+        asyncio.create_task(_market_open_scheduler())
 
         # === Start Discord bot (no-op if DISCORD_BOT_TOKEN not set or DISCORD_BOT_ENABLED=false) ===
         try:
