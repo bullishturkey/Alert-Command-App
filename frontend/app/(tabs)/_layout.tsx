@@ -1,8 +1,10 @@
 import { Tabs } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { colors } from '../../theme';
+
+const MIDAS_GOLD = '#FFD24A';
 
 export default function TabLayout() {
   const { user, isLoading } = useAuth();
@@ -42,6 +44,13 @@ export default function TabLayout() {
       <Tabs.Screen name="news" options={{
         title: 'Preflight',
         tabBarIcon: ({ color, size }) => <Ionicons name="airplane" size={size} color={color} />,
+      }} />
+      <Tabs.Screen name="midas" options={{
+        title: 'Midas',
+        tabBarIcon: ({ focused, size }) => (
+          <MaterialCommunityIcons name="robot" size={size + 2} color={focused ? MIDAS_GOLD : MIDAS_GOLD} />
+        ),
+        tabBarActiveTintColor: MIDAS_GOLD,
       }} />
       <Tabs.Screen name="learn" options={{
         title: 'Onboard',

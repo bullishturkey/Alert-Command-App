@@ -687,14 +687,58 @@ backend:
 
 test_plan:
   current_focus:
-    - "Remember Me Login - pass remember_me to create_token"
-    - "Daily NDX Auto-Reclassify Scheduler at 1 PM PT"
-    - "_run_ndx_close_reclassify helper function"
-    - "Stay Logged In UI toggle on login screen"
-    - "useAppForeground hook in tabs"
+    - "Midas Module - Admin endpoint /admin/midas/users (KeyError bug)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+  - task: "Midas Module - Bot-facing endpoints (X-Midas-Key)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ VERIFIED via /app/backend_test.py against external URL. (a) POST /api/midas/members WITHOUT X-Midas-Key → 403 ✅. (b) POST /api/midas/members WITH header (X-Midas-Key=WEBHOOK_SECRET) + {discord_id:'111222333', display_name:'Test Trader', action:'add'} → 200 with {status:'added', discord_id:'111222333'} ✅. (c) POST /api/midas/trades WITH header + full trade body (NDX, 26450.5, 26400/26350, 2 contracts, 5.00 limit, balance 12000, order abc123, filled, 2026-05-13T17:00:00Z) → 200 with {status:'logged', id:<uuid>} ✅. (d) GET /api/midas/subscribers WITH header → 200 {subscribers:[], count:0} — the Discord-only member from step (b) correctly does NOT appear because the query filters by connected:true and tastytrade_refresh_token_enc!='' ✅. _require_midas_key correctly compares to WEBHOOK_SECRET."
+
+  - task: "Midas Module - End-user endpoints (Bearer JWT)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ ALL END-USER FLOW STEPS PASS via admin token (gregrussell90@gmail.com / Liltony2026): (6) GET /api/midas/status → 200 {midas_enabled:true, connected:false, account_balance:null, limit_price:5.0, auto_trade:false, contracts:1, masks:''} — admin bypasses the gate as expected. (7) POST /api/midas/connect with {client_secret:'test_secret_abcd', refresh_token:'test_refresh_wxyz'} → 200 {status:'connected'}. (8) GET /api/midas/status → connected:true, client_secret_mask='••••••••abcd', refresh_token_mask='••••••••wxyz' (exact match including 8 bullet chars), account_balance=null (Tastytrade OAuth correctly fails silently with fake creds — log warning only, NO 500), contracts=1 (midas_contracts_for_balance(0)=1), limit_price=5.0, auto_trade=false. (9) POST /api/midas/settings {auto_trade:true, limit_price:7.5} → 200 {status:'updated'}. (10) GET /api/midas/status → auto_trade:true, limit_price:7.5. (11) POST /api/midas/settings {limit_price:999} → 400 'limit_price must be between 0.05 and 100'. (12) GET /api/midas/trades → 200 {trades:[]} — admin user_id has 0 trades (the test trade was logged under discord_id 111222333 with empty user_id, as expected). (13) POST /api/midas/disconnect → 200 {status:'disconnected'}; subsequent GET /api/midas/status → connected:false. Encryption/decryption via Fernet works correctly across the connect/status round-trip."
+
+  - task: "Midas Module - Admin endpoints"
+    implemented: true
+    working: false
+    file: "/app/backend/server.py"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: false
+          agent: "testing"
+          comment: "❌ GET /api/admin/midas/users returns HTTP 500 due to KeyError: 'user_id' at server.py:2961. Root cause: when POST /api/midas/members (bot endpoint) inserts a subscriber by discord_id only, the resulting midas_subscribers doc has NO user_id field (see line 2993-3007 — the $set/$setOnInsert blocks don't write user_id for Discord-first members). Then admin_midas_users (line 2960-2961) does:\n    midas_docs = await db.midas_subscribers.find({}, {'_id': 0}).to_list(2000)\n    by_user = {d['user_id']: d for d in midas_docs}\nThis dict-comprehension crashes with KeyError on the first doc that lacks user_id. Full traceback in /var/log/supervisor/backend.err.log confirms KeyError: 'user_id'.\n\nFIX (one-line): change line 2961 to `by_user = {d['user_id']: d for d in midas_docs if d.get('user_id')}` (or use `d.get('user_id') or d.get('discord_id')` as key). This is a defensive-coding bug — any Discord-only member added via the bot endpoint will permanently break this admin route until cleared.\n\n✅ POST /api/admin/midas/toggle-access works correctly: with admin token + {user_id:<non-admin>, enabled:true} → 200 {status:'ok', user_id:..., enabled:true}. Backend log: 'Admin BT enabled Midas for TEST_reclassify_b8026865@example.com'. _ensure_midas_doc upserts properly and the midas_enabled flag is written. Only the GET listing endpoint is broken."
+
+  - task: "Midas Module - Regression (existing endpoints)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ GET /api/alerts (admin Bearer) → 200. GET /api/ai/sentiment (admin Bearer) → 200. POST /api/alerts/webhook (X-Webhook-Secret) + {content:'NDX bullish breakout @ 26500 (midas test)'} → 200 with alert_id. Backend log shows 'Webhook alert received: NDX @ 26500' and 'Push: no registered devices — skipping alert <id>' (clean — no exceptions). No 500s anywhere outside of /admin/midas/users."
     - agent: "testing"
       message: "✅ PUSH TITLE FORMATTING REVIEW VERIFIED (12/12 checks via /app/backend_test.py against external URL https://alert-refresh.preview.emergentagent.com/api).\n\n[Webhook bullish] POST /api/alerts/webhook with X-Webhook-Secret + body {content:'NDX bullish breakout @ 26500'} → 200 + alert_id. Persisted alert: type='bullish', ticker='NDX', source='webhook', price='26500'.\n[Webhook bearish] {content:'SPY bearish breakdown 580.50'} → 200. Persisted alert: type='bearish', ticker='NDX' (expected — webhook handler hardcodes ticker='NDX' on line 1169 regardless of content), source='webhook', price='580.50'.\n[Webhook neutral signal] {content:'Trade signal at 26450'} → 200. type='signal' (no bull/bear keywords), ticker='NDX', source='webhook', price='26450'.\n[Auth] POST /api/alerts/webhook without X-Webhook-Secret → 403 ✅.\n\nThe new push-title formatting block (server.py:1179-1184) executed cleanly for all three alerts — no exceptions, no 500s, no warnings. Backend log shows clean 'Webhook alert received: NDX @ <price>' for each. send_push_notifications() returns silently when no Expo push tokens are registered (current state), which matches the review's acceptance criterion ('N may be 0 if no tokens, that's OK'). The Discord callback path (server.py:3038-3046) uses the identical template and is wrapped in try/except with a logger.warning fallback — verified by code review.\n\n[Regressions all pass]\n  • POST /api/auth/login (gregrussell90@gmail.com / Liltony2026, remember_me=true) → 200 + JWT; decoded JWT exp shows ~90.0d TTL ✅\n  • GET /api/ai/sentiment (admin Bearer) → 200 in 0.12s; mode='weekly_recap' (Sat 2026-05-09); generated_at='2026-05-09T17:06:52.113633+00:00' (valid ISO 8601) ✅\n  • GET /api/alerts (admin Bearer) → 200 with 369 alerts ✅\n  • GET /api/preflight (admin Bearer) → 200 in 0.41s with all expected keys (date, economic_events, economic_source, earnings, breaking_news) ✅\n  • POST /api/alerts/webhook with NO X-Webhook-Secret → 403 ✅\n\nAcceptance criteria met. No code changes required."
     - agent: "testing"

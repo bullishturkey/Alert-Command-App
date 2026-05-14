@@ -16,7 +16,25 @@ export default function AdminScreen() {
   const [discord, setDiscord] = useState<any>(null);
   const [importStatus, setImportStatus] = useState<any>(null);
   const [importing, setImporting] = useState(false);
+  const [midasMap, setMidasMap] = useState<Record<string, { enabled: boolean; connected: boolean; auto_trade: boolean }>>({});
   const importPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const toggleMidasAccess = async (u: any) => {
+    const current = midasMap[u.id]?.enabled || false;
+    const next = !current;
+    // optimistic update
+    setMidasMap(prev => ({ ...prev, [u.id]: { ...(prev[u.id] || {}), enabled: next, connected: prev[u.id]?.connected || false, auto_trade: prev[u.id]?.auto_trade || false } }));
+    try {
+      await apiFetch('/api/admin/midas/toggle-access', {
+        method: 'POST',
+        body: JSON.stringify({ user_id: u.id, enabled: next }),
+      });
+    } catch (e: any) {
+      // rollback
+      setMidasMap(prev => ({ ...prev, [u.id]: { ...(prev[u.id] || {}), enabled: current } }));
+      Alert.alert('Error', e?.message || 'Failed to toggle Midas access');
+    }
+  };
 
   // Alert form
   const [alertTitle, setAlertTitle] = useState('');
@@ -33,12 +51,20 @@ export default function AdminScreen() {
         apiFetch('/api/admin/users'),
         apiFetch('/api/admin/discord/status'),
         apiFetch('/api/admin/discord/import-status'),
+        apiFetch('/api/admin/midas/users'),
       ]);
-      const [statsRes, usersRes, discordRes, importRes] = results;
+      const [statsRes, usersRes, discordRes, importRes, midasRes] = results;
       if (statsRes.status === 'fulfilled') setStats(statsRes.value);
       if (usersRes.status === 'fulfilled') setUsers(usersRes.value.users || []);
       if (discordRes.status === 'fulfilled') setDiscord(discordRes.value);
       if (importRes.status === 'fulfilled') setImportStatus(importRes.value);
+      if (midasRes.status === 'fulfilled') {
+        const map: Record<string, any> = {};
+        (midasRes.value.users || []).forEach((u: any) => {
+          map[u.id] = { enabled: !!u.midas_enabled, connected: !!u.connected, auto_trade: !!u.auto_trade };
+        });
+        setMidasMap(map);
+      }
     } catch (e) {
       console.error('Admin fetch error:', e);
     } finally {
@@ -377,15 +403,26 @@ export default function AdminScreen() {
                 </View>
               </View>
               {!u.is_admin && (
-                revoked ? (
-                  <TouchableOpacity onPress={() => reinstateUser(u)} style={styles.actionBtnReinstate}>
-                    <Text style={styles.actionBtnReinstateTxt}>Reinstate</Text>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <TouchableOpacity
+                    onPress={() => toggleMidasAccess(u)}
+                    style={[styles.actionBtnRevoke, { backgroundColor: midasMap[u.id]?.enabled ? 'rgba(255,210,74,0.18)' : 'rgba(255,210,74,0.06)', borderColor: 'rgba(255,210,74,0.4)' }]}
+                  >
+                    <Ionicons name={midasMap[u.id]?.connected ? 'flash' : 'sparkles-outline'} size={11} color="#FFD24A" />
+                    <Text style={[styles.actionBtnRevokeTxt, { color: '#FFD24A', marginLeft: 4 }]}>
+                      {midasMap[u.id]?.enabled ? 'Midas ON' : 'Midas OFF'}
+                    </Text>
                   </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity onPress={() => revokeUser(u)} style={styles.actionBtnRevoke}>
-                    <Text style={styles.actionBtnRevokeTxt}>Revoke</Text>
-                  </TouchableOpacity>
-                )
+                  {revoked ? (
+                    <TouchableOpacity onPress={() => reinstateUser(u)} style={styles.actionBtnReinstate}>
+                      <Text style={styles.actionBtnReinstateTxt}>Reinstate</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity onPress={() => revokeUser(u)} style={styles.actionBtnRevoke}>
+                      <Text style={styles.actionBtnRevokeTxt}>Revoke</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               )}
             </View>
           );

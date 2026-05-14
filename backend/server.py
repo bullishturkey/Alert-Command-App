@@ -33,6 +33,55 @@ JWT_SECRET = os.environ.get('JWT_SECRET', 'alerts-command-jwt-secret-2026-secure
 WEBHOOK_SECRET = os.environ.get('WEBHOOK_SECRET', '')
 
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+MIDAS_ENCRYPTION_KEY = os.environ.get('MIDAS_ENCRYPTION_KEY', '')
+
+# === MIDAS ENCRYPTION HELPERS ===
+# Symmetric encryption for Tastytrade OAuth client_secret + refresh_token at rest.
+try:
+    from cryptography.fernet import Fernet as _Fernet
+    _midas_fernet = _Fernet(MIDAS_ENCRYPTION_KEY.encode()) if MIDAS_ENCRYPTION_KEY else None
+except Exception:
+    _midas_fernet = None
+
+def midas_encrypt(plain: str) -> str:
+    if not plain or _midas_fernet is None:
+        return ''
+    return _midas_fernet.encrypt(plain.encode()).decode()
+
+def midas_decrypt(enc: str) -> str:
+    if not enc or _midas_fernet is None:
+        return ''
+    try:
+        return _midas_fernet.decrypt(enc.encode()).decode()
+    except Exception:
+        return ''
+
+def midas_mask(plain: str) -> str:
+    """Show only last 4 chars for safe display: '••••••••wXyZ'."""
+    if not plain:
+        return ''
+    s = str(plain)
+    if len(s) <= 4:
+        return '••••' + s
+    return '••••••••' + s[-4:]
+
+def midas_contracts_for_balance(balance: float) -> int:
+    """Position sizing rubric:
+    <7k=1, 7-14999=2, 15-19999=3, 20-24999=4, +5k tier = +1."""
+    try:
+        b = float(balance or 0)
+    except Exception:
+        return 1
+    if b < 7000:
+        return 1
+    if b < 15000:
+        return 2
+    if b < 20000:
+        return 3
+    if b < 25000:
+        return 4
+    return 4 + int((b - 20000) // 5000)
+
 
 # === APP SETUP ===
 app = FastAPI(title="Alerts Command API")
@@ -2643,6 +2692,375 @@ async def get_discord_import_status(user=Depends(get_admin_user)):
     return _discord_import_state
 
 
+# =====================
+# MIDAS — Automated NDX 0DTE Trading Bot
+# =====================
+# Collections used:
+#   midas_subscribers — { user_id, discord_id, display_name, tastytrade_client_secret_enc,
+#                         tastytrade_refresh_token_enc, account_number, account_balance,
+#                         balance_updated_at, limit_price, auto_trade, midas_enabled, created_at }
+#   midas_trades     — { user_id, discord_id, underlying, price_at_alert, short_strike,
+#                         long_strike, contracts, limit_price, account_balance, order_id,
+#                         status, timestamp }
+#
+# Auth modes:
+#   - End-user endpoints require Bearer JWT (get_current_user).
+#   - Bot-facing endpoints (/api/midas/members, /trades [POST], /subscribers) require
+#     X-Midas-Key header that matches WEBHOOK_SECRET.
+
+TASTYTRADE_API_BASE = os.environ.get('TASTYTRADE_API_BASE', 'https://api.tastyworks.com')
+_TT_BALANCE_TTL = 300  # 5 minutes
+
+def _require_midas_key(x_midas_key: Optional[str]) -> None:
+    if not WEBHOOK_SECRET or x_midas_key != WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail='Invalid X-Midas-Key')
+
+
+async def _tastytrade_get_access_token(client_secret: str, refresh_token: str) -> Optional[str]:
+    """Exchange refresh_token for a short-lived access_token via Tastytrade OAuth."""
+    if not client_secret or not refresh_token:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.post(
+                f"{TASTYTRADE_API_BASE}/oauth/token",
+                data={
+                    'grant_type': 'refresh_token',
+                    'refresh_token': refresh_token,
+                    'client_secret': client_secret,
+                },
+                headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            )
+            if r.status_code != 200:
+                logger.warning(f"Tastytrade token exchange failed: {r.status_code}")
+                return None
+            return (r.json() or {}).get('access_token')
+    except Exception as e:
+        logger.warning(f"Tastytrade token exchange error: {e}")
+        return None
+
+
+async def _tastytrade_fetch_balance(client_secret: str, refresh_token: str) -> Dict[str, Any]:
+    """Fetch the user's primary account number + cash-balance. Returns {account_number, balance} or {}.
+    Uses Tastytrade REST API. Cached upstream by the calling endpoint."""
+    token = await _tastytrade_get_access_token(client_secret, refresh_token)
+    if not token:
+        return {}
+    headers = {'Authorization': token, 'Accept': 'application/json'}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            # 1) Get the user's accounts
+            r = await client.get(f"{TASTYTRADE_API_BASE}/customers/me/accounts", headers=headers)
+            if r.status_code != 200:
+                return {}
+            accs = (((r.json() or {}).get('data') or {}).get('items')) or []
+            if not accs:
+                return {}
+            # Pick the first non-closed account
+            acc = next((a.get('account', a) for a in accs if not (a.get('account', a) or {}).get('is-closed')), None) or (accs[0].get('account', accs[0]))
+            acc_number = acc.get('account-number') or acc.get('accountNumber')
+            if not acc_number:
+                return {}
+            # 2) Get balances
+            rb = await client.get(f"{TASTYTRADE_API_BASE}/accounts/{acc_number}/balances", headers=headers)
+            if rb.status_code != 200:
+                return {'account_number': acc_number, 'balance': None}
+            bal_data = (rb.json() or {}).get('data') or {}
+            balance = (
+                bal_data.get('net-liquidating-value')
+                or bal_data.get('cash-balance')
+                or bal_data.get('equity-buying-power')
+                or 0
+            )
+            try:
+                balance = float(balance)
+            except Exception:
+                balance = 0.0
+            return {'account_number': acc_number, 'balance': balance}
+    except Exception as e:
+        logger.warning(f"Tastytrade balance fetch error: {e}")
+        return {}
+
+
+async def _ensure_midas_doc(user_id: str) -> Dict[str, Any]:
+    """Get or initialize the midas_subscribers row for a given app user."""
+    doc = await db.midas_subscribers.find_one({'user_id': user_id}, {'_id': 0})
+    if not doc:
+        doc = {
+            'user_id': user_id,
+            'midas_enabled': False,
+            'connected': False,
+            'tastytrade_client_secret_enc': '',
+            'tastytrade_refresh_token_enc': '',
+            'account_number': '',
+            'account_balance': None,
+            'balance_updated_at': None,
+            'limit_price': 5.00,
+            'auto_trade': False,
+            'created_at': datetime.now(timezone.utc).isoformat(),
+        }
+        await db.midas_subscribers.insert_one(dict(doc))
+    return doc
+
+
+# ----- END-USER ENDPOINTS (Bearer JWT) -----
+
+@api_router.get("/midas/status")
+async def midas_get_status(user=Depends(get_current_user)):
+    """Returns the current user's Midas configuration + live balance (cached 5m)."""
+    doc = await _ensure_midas_doc(user['id'])
+    enabled = bool(doc.get('midas_enabled') or user.get('is_admin'))
+    if not enabled:
+        return {
+            'midas_enabled': False,
+            'connected': False,
+            'message': 'Midas access is not enabled on your account. Contact your admin.',
+        }
+    # If connected, refresh balance from Tastytrade (5-min server-side cache)
+    cached_at = doc.get('balance_updated_at')
+    needs_refresh = True
+    if cached_at:
+        try:
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(cached_at.replace('Z', '+00:00'))).total_seconds()
+            needs_refresh = age > _TT_BALANCE_TTL
+        except Exception:
+            needs_refresh = True
+    balance = doc.get('account_balance')
+    account_number = doc.get('account_number') or ''
+    is_connected = bool(doc.get('connected') and doc.get('tastytrade_refresh_token_enc'))
+    if is_connected and needs_refresh:
+        cs = midas_decrypt(doc.get('tastytrade_client_secret_enc') or '')
+        rt = midas_decrypt(doc.get('tastytrade_refresh_token_enc') or '')
+        res = await _tastytrade_fetch_balance(cs, rt)
+        if res:
+            balance = res.get('balance')
+            if res.get('account_number'):
+                account_number = res['account_number']
+            await db.midas_subscribers.update_one(
+                {'user_id': user['id']},
+                {'$set': {
+                    'account_balance': balance,
+                    'account_number': account_number,
+                    'balance_updated_at': datetime.now(timezone.utc).isoformat(),
+                }},
+            )
+    contracts = midas_contracts_for_balance(balance or 0)
+    return {
+        'midas_enabled': True,
+        'connected': is_connected,
+        'account_number': account_number,
+        'account_balance': balance,
+        'limit_price': float(doc.get('limit_price') or 5.00),
+        'auto_trade': bool(doc.get('auto_trade')),
+        'contracts': contracts,
+        'client_secret_mask': midas_mask(midas_decrypt(doc.get('tastytrade_client_secret_enc') or '')) if is_connected else '',
+        'refresh_token_mask': midas_mask(midas_decrypt(doc.get('tastytrade_refresh_token_enc') or '')) if is_connected else '',
+    }
+
+
+@api_router.post("/midas/connect")
+async def midas_connect(body: dict = Body(...), user=Depends(get_current_user)):
+    """Save the user's Tastytrade OAuth client_secret + refresh_token (encrypted at rest)."""
+    doc = await _ensure_midas_doc(user['id'])
+    if not (doc.get('midas_enabled') or user.get('is_admin')):
+        raise HTTPException(status_code=403, detail='Midas access not enabled on this account')
+    client_secret = (body.get('client_secret') or '').strip()
+    refresh_token = (body.get('refresh_token') or '').strip()
+    if not client_secret or not refresh_token:
+        raise HTTPException(status_code=400, detail='client_secret and refresh_token are required')
+    await db.midas_subscribers.update_one(
+        {'user_id': user['id']},
+        {'$set': {
+            'tastytrade_client_secret_enc': midas_encrypt(client_secret),
+            'tastytrade_refresh_token_enc': midas_encrypt(refresh_token),
+            'connected': True,
+            # null out balance so first /status call hits Tastytrade
+            'account_balance': None,
+            'balance_updated_at': None,
+            'connected_at': datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    logger.info(f"Midas: user {user['username']} connected Tastytrade")
+    return {'status': 'connected'}
+
+
+@api_router.post("/midas/disconnect")
+async def midas_disconnect(user=Depends(get_current_user)):
+    """Remove the user's Tastytrade credentials. Auto-trade is also disabled."""
+    await db.midas_subscribers.update_one(
+        {'user_id': user['id']},
+        {'$set': {
+            'tastytrade_client_secret_enc': '',
+            'tastytrade_refresh_token_enc': '',
+            'connected': False,
+            'auto_trade': False,
+            'account_number': '',
+            'account_balance': None,
+            'balance_updated_at': None,
+        }},
+    )
+    logger.info(f"Midas: user {user['username']} disconnected Tastytrade")
+    return {'status': 'disconnected'}
+
+
+@api_router.post("/midas/settings")
+async def midas_update_settings(body: dict = Body(...), user=Depends(get_current_user)):
+    """Update auto_trade toggle and/or limit_price."""
+    doc = await _ensure_midas_doc(user['id'])
+    if not (doc.get('midas_enabled') or user.get('is_admin')):
+        raise HTTPException(status_code=403, detail='Midas access not enabled')
+    updates: Dict[str, Any] = {}
+    if 'auto_trade' in body:
+        updates['auto_trade'] = bool(body['auto_trade'])
+    if 'limit_price' in body:
+        try:
+            lp = float(body['limit_price'])
+            if lp < 0.05 or lp > 100:
+                raise HTTPException(status_code=400, detail='limit_price must be between 0.05 and 100')
+            updates['limit_price'] = round(lp, 2)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail='limit_price must be a number')
+    if updates:
+        await db.midas_subscribers.update_one({'user_id': user['id']}, {'$set': updates})
+    return {'status': 'updated', 'updates': updates}
+
+
+@api_router.get("/midas/trades")
+async def midas_my_trades(user=Depends(get_current_user), limit: int = 100):
+    """Return the trade history for the current user."""
+    doc = await _ensure_midas_doc(user['id'])
+    if not (doc.get('midas_enabled') or user.get('is_admin')):
+        return {'trades': []}
+    cursor = db.midas_trades.find({'user_id': user['id']}, {'_id': 0}).sort('timestamp', -1).limit(min(max(limit, 1), 500))
+    trades = await cursor.to_list(length=limit)
+    return {'trades': trades}
+
+
+# ----- ADMIN ENDPOINTS -----
+
+@api_router.post("/admin/midas/toggle-access")
+async def admin_midas_toggle_access(body: dict = Body(...), user=Depends(get_admin_user)):
+    """Admin: whitelist (or revoke) a user's access to the Midas module."""
+    user_id = (body.get('user_id') or '').strip()
+    enabled = bool(body.get('enabled', True))
+    if not user_id:
+        raise HTTPException(status_code=400, detail='user_id is required')
+    target = await db.users.find_one({'id': user_id}, {'_id': 0, 'id': 1, 'email': 1})
+    if not target:
+        raise HTTPException(status_code=404, detail='User not found')
+    await _ensure_midas_doc(user_id)
+    await db.midas_subscribers.update_one({'user_id': user_id}, {'$set': {'midas_enabled': enabled}})
+    logger.info(f"Admin {user['username']} {'enabled' if enabled else 'disabled'} Midas for {target.get('email')}")
+    return {'status': 'ok', 'user_id': user_id, 'enabled': enabled}
+
+
+@api_router.get("/admin/midas/users")
+async def admin_midas_users(user=Depends(get_admin_user)):
+    """Admin: list all users with Midas-related state (enabled / connected)."""
+    midas_docs = await db.midas_subscribers.find({}, {'_id': 0}).to_list(2000)
+    by_user = {d['user_id']: d for d in midas_docs}
+    out = []
+    async for u in db.users.find({}, {'_id': 0, 'id': 1, 'email': 1, 'username': 1, 'is_admin': 1}):
+        m = by_user.get(u['id'], {})
+        out.append({
+            **u,
+            'midas_enabled': bool(m.get('midas_enabled')),
+            'connected': bool(m.get('connected')),
+            'auto_trade': bool(m.get('auto_trade')),
+            'limit_price': m.get('limit_price', 5.0),
+            'account_number': m.get('account_number', ''),
+            'account_balance': m.get('account_balance'),
+        })
+    return {'users': out}
+
+
+# ----- BOT-FACING ENDPOINTS (X-Midas-Key) -----
+
+@api_router.post("/midas/members")
+async def midas_members(body: dict = Body(...), x_midas_key: Optional[str] = Header(None)):
+    """Bot endpoint: add or remove a user from the Midas subscriber list (matched by discord_id).
+    Body: { discord_id, display_name, action: 'add' | 'remove' }"""
+    _require_midas_key(x_midas_key)
+    discord_id = str(body.get('discord_id') or '').strip()
+    display_name = str(body.get('display_name') or '').strip()
+    action = (body.get('action') or 'add').lower()
+    if not discord_id:
+        raise HTTPException(status_code=400, detail='discord_id is required')
+    if action == 'remove':
+        await db.midas_subscribers.update_many({'discord_id': discord_id}, {'$set': {'midas_enabled': False, 'auto_trade': False}})
+        return {'status': 'removed', 'discord_id': discord_id}
+    # add: just register the discord_id mapping; the user must still log in to the app and Connect
+    await db.midas_subscribers.update_one(
+        {'discord_id': discord_id},
+        {'$set': {
+            'discord_id': discord_id,
+            'display_name': display_name,
+            'midas_enabled': True,
+            'updated_at': datetime.now(timezone.utc).isoformat(),
+        }, '$setOnInsert': {
+            'limit_price': 5.00,
+            'auto_trade': False,
+            'connected': False,
+            'created_at': datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+    return {'status': 'added', 'discord_id': discord_id}
+
+
+@api_router.post("/midas/trades")
+async def midas_log_trade(body: dict = Body(...), x_midas_key: Optional[str] = Header(None)):
+    """Bot endpoint: log a completed trade attempt by the Midas Discord bot."""
+    _require_midas_key(x_midas_key)
+    discord_id = str(body.get('discord_id') or '').strip()
+    if not discord_id:
+        raise HTTPException(status_code=400, detail='discord_id is required')
+    sub = await db.midas_subscribers.find_one({'discord_id': discord_id}, {'_id': 0, 'user_id': 1})
+    user_id = (sub or {}).get('user_id', '')
+    trade = {
+        'id': str(uuid.uuid4()),
+        'discord_id': discord_id,
+        'user_id': user_id,
+        'underlying': body.get('underlying') or 'NDX',
+        'price_at_alert': body.get('price_at_alert'),
+        'short_strike': body.get('short_strike'),
+        'long_strike': body.get('long_strike'),
+        'contracts': int(body.get('contracts') or 0),
+        'limit_price': float(body.get('limit_price') or 0),
+        'account_balance': body.get('account_balance'),
+        'order_id': body.get('order_id') or '',
+        'status': (body.get('status') or 'pending').lower(),
+        'timestamp': body.get('timestamp') or datetime.now(timezone.utc).isoformat(),
+    }
+    await db.midas_trades.insert_one(dict(trade))
+    return {'status': 'logged', 'id': trade['id']}
+
+
+@api_router.get("/midas/subscribers")
+async def midas_subscribers(x_midas_key: Optional[str] = Header(None)):
+    """Bot endpoint: return all ACTIVE Midas subscribers + their (decrypted) Tastytrade creds.
+    The bot uses these to place trades on each member's account when an alert fires."""
+    _require_midas_key(x_midas_key)
+    cursor = db.midas_subscribers.find(
+        {'midas_enabled': True, 'connected': True, 'tastytrade_refresh_token_enc': {'$ne': ''}},
+        {'_id': 0},
+    )
+    docs = await cursor.to_list(2000)
+    out = []
+    for d in docs:
+        out.append({
+            'discord_id': d.get('discord_id', ''),
+            'user_id': d.get('user_id', ''),
+            'tastytrade_client_secret': midas_decrypt(d.get('tastytrade_client_secret_enc') or ''),
+            'tastytrade_refresh_token': midas_decrypt(d.get('tastytrade_refresh_token_enc') or ''),
+            'limit_price': float(d.get('limit_price') or 5.0),
+            'auto_trade': bool(d.get('auto_trade')),
+            'account_number': d.get('account_number', ''),
+            'account_balance': d.get('account_balance'),
+        })
+    return {'subscribers': out, 'count': len(out)}
+
+
 app.include_router(api_router)
 app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -2894,7 +3312,12 @@ async def startup():
             await db.push_tokens.create_index("token", unique=True)
             await db.push_tokens.create_index("user_id")
             await db.messages.create_index([("channel_id", 1), ("created_at", -1)])
-            logger.info("DB indexes ensured (10 indexes)")
+            # Midas indexes
+            await db.midas_subscribers.create_index("user_id", unique=True, sparse=True)
+            await db.midas_subscribers.create_index("discord_id", sparse=True)
+            await db.midas_trades.create_index([("user_id", 1), ("timestamp", -1)])
+            await db.midas_trades.create_index([("discord_id", 1), ("timestamp", -1)])
+            logger.info("DB indexes ensured (14 indexes)")
         except Exception as e:
             logger.error(f"Index creation issue: {e}")
 
