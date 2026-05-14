@@ -2958,7 +2958,7 @@ async def admin_midas_toggle_access(body: dict = Body(...), user=Depends(get_adm
 async def admin_midas_users(user=Depends(get_admin_user)):
     """Admin: list all users with Midas-related state (enabled / connected)."""
     midas_docs = await db.midas_subscribers.find({}, {'_id': 0}).to_list(2000)
-    by_user = {d['user_id']: d for d in midas_docs}
+    by_user = {d['user_id']: d for d in midas_docs if d.get('user_id')}
     out = []
     async for u in db.users.find({}, {'_id': 0, 'id': 1, 'email': 1, 'username': 1, 'is_admin': 1}):
         m = by_user.get(u['id'], {})

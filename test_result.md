@@ -718,12 +718,15 @@ test_plan:
 
   - task: "Midas Module - Admin endpoints"
     implemented: true
-    working: false
+    working: true
     file: "/app/backend/server.py"
-    stuck_count: 1
+    stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ KEYERROR FIX VERIFIED (2026-05-09 retest). server.py:2961 now reads `by_user = {d['user_id']: d for d in midas_docs if d.get('user_id')}` — Discord-only midas_subscribers docs (no user_id) are now skipped instead of crashing. Test flow against external URL: (1) POST /api/auth/login (gregrussell90@gmail.com / Liltony2026) → 200 + admin JWT. (2) POST /api/midas/members with X-Midas-Key=WEBHOOK_SECRET + body {discord_id:'999888777', display_name:'Pure Discord', action:'add'} → 200 {status:'added', discord_id:'999888777'} — creates a Discord-only doc with no user_id, exactly the shape that previously triggered the crash. (3) GET /api/admin/midas/users with admin Bearer → 200 (was 500) with {users:[...13 entries...]} where each row carries id, email, username, is_admin, midas_enabled, connected, auto_trade, limit_price, account_number, account_balance. Admin listing is back online. No exceptions in backend logs."
         - working: false
           agent: "testing"
           comment: "❌ GET /api/admin/midas/users returns HTTP 500 due to KeyError: 'user_id' at server.py:2961. Root cause: when POST /api/midas/members (bot endpoint) inserts a subscriber by discord_id only, the resulting midas_subscribers doc has NO user_id field (see line 2993-3007 — the $set/$setOnInsert blocks don't write user_id for Discord-first members). Then admin_midas_users (line 2960-2961) does:\n    midas_docs = await db.midas_subscribers.find({}, {'_id': 0}).to_list(2000)\n    by_user = {d['user_id']: d for d in midas_docs}\nThis dict-comprehension crashes with KeyError on the first doc that lacks user_id. Full traceback in /var/log/supervisor/backend.err.log confirms KeyError: 'user_id'.\n\nFIX (one-line): change line 2961 to `by_user = {d['user_id']: d for d in midas_docs if d.get('user_id')}` (or use `d.get('user_id') or d.get('discord_id')` as key). This is a defensive-coding bug — any Discord-only member added via the bot endpoint will permanently break this admin route until cleared.\n\n✅ POST /api/admin/midas/toggle-access works correctly: with admin token + {user_id:<non-admin>, enabled:true} → 200 {status:'ok', user_id:..., enabled:true}. Backend log: 'Admin BT enabled Midas for TEST_reclassify_b8026865@example.com'. _ensure_midas_doc upserts properly and the midas_enabled flag is written. Only the GET listing endpoint is broken."
