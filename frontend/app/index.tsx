@@ -27,7 +27,11 @@ export default function AuthScreen() {
   if (user || isGuest) return null;
 
   const handleSubmit = async () => {
-    if (!email || !password || (!isLogin && !username)) {
+    // Trim whitespace — mobile keyboards often add a trailing space when typing/pasting
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPassword = password.trim();
+    const trimmedUsername = username.trim();
+    if (!trimmedEmail || !trimmedPassword || (!isLogin && !trimmedUsername)) {
       setError('Please fill in all fields');
       return;
     }
@@ -35,9 +39,9 @@ export default function AuthScreen() {
     setLoading(true);
     try {
       if (isLogin) {
-        await login(email, password, rememberMe);
+        await login(trimmedEmail, trimmedPassword, rememberMe);
       } else {
-        await register(email, username, password);
+        await register(trimmedEmail, trimmedUsername, trimmedPassword);
       }
     } catch (e: any) {
       setError(e.message || 'Something went wrong');
