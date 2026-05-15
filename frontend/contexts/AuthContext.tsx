@@ -41,6 +41,7 @@ interface AuthContextType {
   continueAsGuest: () => void;
   deleteAccount: () => Promise<void>;
   updateServerUrl: (url: string) => Promise<void>;
+  updateUser: (patch: Partial<User>) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
@@ -217,7 +218,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, isGuest, serverUrl, login, register, logout, continueAsGuest, deleteAccount, updateServerUrl }}>
+    <AuthContext.Provider value={{ user, token, isLoading, isGuest, serverUrl, login, register, logout, continueAsGuest, deleteAccount, updateServerUrl, updateUser: (patch) => setUser((prev) => prev ? { ...prev, ...patch } : prev) }}>
       {children}
     </AuthContext.Provider>
   );

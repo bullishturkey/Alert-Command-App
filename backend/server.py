@@ -540,6 +540,74 @@ async def login(data: UserLogin):
 async def get_me(user=Depends(get_current_user)):
     return {'user': user}
 
+
+@api_router.post("/user/update-profile")
+async def update_profile(body: dict = Body(...), user=Depends(get_current_user)):
+    """Update editable profile fields. Currently only username; email change requires re-verification (future)."""
+    updates: Dict[str, Any] = {}
+    new_username = (body.get('username') or '').strip()
+    if new_username:
+        if len(new_username) < 2 or len(new_username) > 32:
+            raise HTTPException(status_code=400, detail='Username must be 2–32 characters')
+        updates['username'] = new_username
+    if not updates:
+        raise HTTPException(status_code=400, detail='No editable fields provided')
+    await db.users.update_one({'id': user['id']}, {'$set': updates})
+    updated = await db.users.find_one({'id': user['id']}, {'_id': 0, 'password_hash': 0})
+    return {'status': 'ok', 'user': updated}
+
+
+@api_router.get("/user/my-data")
+async def get_my_data(user=Depends(get_current_user)):
+    """Return ALL data stored about the current user — for the in-app data inspector.
+    Secrets are returned masked (only last 4 chars). Used by Settings → Your Data."""
+    uid = user['id']
+    # Profile (no password hash)
+    profile = await db.users.find_one({'id': uid}, {'_id': 0, 'password_hash': 0})
+    # Watchlist
+    watchlist = await db.watchlist.find({'user_id': uid}, {'_id': 0}).to_list(500)
+    # Push tokens (count only — tokens themselves stay private)
+    push_count = await db.push_tokens.count_documents({'user_id': uid})
+    # Midas data
+    midas = await db.midas_subscribers.find_one({'user_id': uid}, {'_id': 0})
+    midas_summary = None
+    if midas:
+        midas_summary = {
+            'midas_enabled': bool(midas.get('midas_enabled')),
+            'connected': bool(midas.get('connected')),
+            'auto_trade': bool(midas.get('auto_trade')),
+            'limit_price': midas.get('limit_price'),
+            'account_number': midas.get('account_number', ''),
+            'account_balance': midas.get('account_balance'),
+            'discord_id': midas.get('discord_id', ''),
+            'client_secret_mask': midas_mask(midas_decrypt(midas.get('tastytrade_client_secret_enc') or '')) if midas.get('connected') else '',
+            'refresh_token_mask': midas_mask(midas_decrypt(midas.get('tastytrade_refresh_token_enc') or '')) if midas.get('connected') else '',
+            'connected_at': midas.get('connected_at', ''),
+        }
+    # Midas trades count
+    midas_trade_count = await db.midas_trades.count_documents({'user_id': uid})
+    return {
+        'profile': profile,
+        'watchlist': [w.get('symbol') for w in watchlist if w.get('symbol')],
+        'push_tokens_count': push_count,
+        'midas': midas_summary,
+        'midas_trade_count': midas_trade_count,
+    }
+
+
+@api_router.delete("/user/watchlist/clear")
+async def clear_my_watchlist(user=Depends(get_current_user)):
+    """Remove ALL watchlist entries for the current user."""
+    result = await db.watchlist.delete_many({'user_id': user['id']})
+    return {'status': 'ok', 'deleted': result.deleted_count}
+
+
+@api_router.delete("/user/push-tokens/clear")
+async def clear_my_push_tokens(user=Depends(get_current_user)):
+    """Unregister all this user's push tokens (disables push notifications until they re-enable)."""
+    result = await db.push_tokens.delete_many({'user_id': user['id']})
+    return {'status': 'ok', 'deleted': result.deleted_count}
+
 # =====================
 # MARKET DATA ENDPOINTS
 # =====================
