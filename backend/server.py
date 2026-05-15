@@ -2964,14 +2964,43 @@ async def admin_midas_users(user=Depends(get_admin_user)):
         m = by_user.get(u['id'], {})
         out.append({
             **u,
+            'discord_id': m.get('discord_id', ''),
+            'discord_display_name': m.get('display_name', ''),
             'midas_enabled': bool(m.get('midas_enabled')),
             'connected': bool(m.get('connected')),
             'auto_trade': bool(m.get('auto_trade')),
             'limit_price': m.get('limit_price', 5.0),
             'account_number': m.get('account_number', ''),
             'account_balance': m.get('account_balance'),
+            'client_secret_mask': midas_mask(midas_decrypt(m.get('tastytrade_client_secret_enc') or '')) if m.get('connected') else '',
+            'refresh_token_mask': midas_mask(midas_decrypt(m.get('tastytrade_refresh_token_enc') or '')) if m.get('connected') else '',
+            'connected_at': m.get('connected_at', ''),
         })
     return {'users': out}
+
+
+@api_router.post("/admin/midas/link-discord")
+async def admin_midas_link_discord(body: dict = Body(...), user=Depends(get_admin_user)):
+    """Admin: link an app user to a Discord ID (so the Midas Discord bot can match them).
+    Body: { user_id, discord_id, display_name? }"""
+    user_id = (body.get('user_id') or '').strip()
+    discord_id = (body.get('discord_id') or '').strip()
+    display_name = (body.get('display_name') or '').strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail='user_id is required')
+    target = await db.users.find_one({'id': user_id}, {'_id': 0, 'id': 1, 'email': 1, 'username': 1})
+    if not target:
+        raise HTTPException(status_code=404, detail='User not found')
+    await _ensure_midas_doc(user_id)
+    # If discord_id is empty/blank, unlink it
+    update_doc: Dict[str, Any] = {
+        'discord_id': discord_id,
+        'display_name': display_name or target.get('username') or '',
+        'updated_at': datetime.now(timezone.utc).isoformat(),
+    }
+    await db.midas_subscribers.update_one({'user_id': user_id}, {'$set': update_doc})
+    logger.info(f"Admin {user['username']} linked user {target.get('email')} → discord {discord_id or '(unlinked)'}")
+    return {'status': 'ok', 'user_id': user_id, 'discord_id': discord_id}
 
 
 # ----- BOT-FACING ENDPOINTS (X-Midas-Key) -----

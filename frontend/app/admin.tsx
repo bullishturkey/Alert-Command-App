@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ScrollView, ActivityIndicator, Alert, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,8 +16,40 @@ export default function AdminScreen() {
   const [discord, setDiscord] = useState<any>(null);
   const [importStatus, setImportStatus] = useState<any>(null);
   const [importing, setImporting] = useState(false);
-  const [midasMap, setMidasMap] = useState<Record<string, { enabled: boolean; connected: boolean; auto_trade: boolean }>>({});
+  const [midasMap, setMidasMap] = useState<Record<string, any>>({});
+  const [detailUser, setDetailUser] = useState<any | null>(null);
+  const [discordDraft, setDiscordDraft] = useState('');
+  const [savingDiscord, setSavingDiscord] = useState(false);
   const importPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const openUserDetail = (u: any) => {
+    setDetailUser(u);
+    setDiscordDraft(midasMap[u.id]?.discord_id || '');
+  };
+
+  const saveDiscordLink = async () => {
+    if (!detailUser) return;
+    setSavingDiscord(true);
+    try {
+      await apiFetch('/api/admin/midas/link-discord', {
+        method: 'POST',
+        body: JSON.stringify({
+          user_id: detailUser.id,
+          discord_id: discordDraft.trim(),
+          display_name: detailUser.username || '',
+        }),
+      });
+      setMidasMap(prev => ({
+        ...prev,
+        [detailUser.id]: { ...(prev[detailUser.id] || {}), discord_id: discordDraft.trim() },
+      }));
+      Alert.alert('Saved', discordDraft.trim() ? `Discord ID ${discordDraft.trim()} linked.` : 'Discord ID unlinked.');
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to save Discord link');
+    } finally {
+      setSavingDiscord(false);
+    }
+  };
 
   const toggleMidasAccess = async (u: any) => {
     const current = midasMap[u.id]?.enabled || false;
@@ -61,7 +93,19 @@ export default function AdminScreen() {
       if (midasRes.status === 'fulfilled') {
         const map: Record<string, any> = {};
         (midasRes.value.users || []).forEach((u: any) => {
-          map[u.id] = { enabled: !!u.midas_enabled, connected: !!u.connected, auto_trade: !!u.auto_trade };
+          map[u.id] = {
+            enabled: !!u.midas_enabled,
+            connected: !!u.connected,
+            auto_trade: !!u.auto_trade,
+            discord_id: u.discord_id || '',
+            discord_display_name: u.discord_display_name || '',
+            account_number: u.account_number || '',
+            account_balance: u.account_balance,
+            limit_price: u.limit_price,
+            client_secret_mask: u.client_secret_mask || '',
+            refresh_token_mask: u.refresh_token_mask || '',
+            connected_at: u.connected_at || '',
+          };
         });
         setMidasMap(map);
       }
@@ -387,8 +431,14 @@ export default function AdminScreen() {
         <Text style={styles.sectionTitle}>Users ({users.length})</Text>
         {users.map(u => {
           const revoked = !!u.is_revoked;
+          const m = midasMap[u.id] || {};
           return (
-            <View key={u.id} style={[styles.userCard, revoked && { opacity: 0.7, borderWidth: 1, borderColor: colors.red + '66' }]}>
+            <TouchableOpacity
+              key={u.id}
+              activeOpacity={0.7}
+              onPress={() => openUserDetail(u)}
+              style={[styles.userCard, revoked && { opacity: 0.7, borderWidth: 1, borderColor: colors.red + '66' }]}
+            >
               <View style={styles.userInfo}>
                 <View style={[styles.avatarBadge, u.is_admin && styles.avatarBadgeAdmin]}>
                   <Text style={styles.avatarText}>{u.username?.charAt(0)?.toUpperCase() || '?'}</Text>
@@ -398,39 +448,162 @@ export default function AdminScreen() {
                     <Text style={styles.userName} numberOfLines={1}>{u.username}</Text>
                     {u.is_admin && <View style={styles.adminBadge}><Text style={styles.adminBadgeText}>Admin</Text></View>}
                     {revoked && <View style={{ backgroundColor: colors.redBgStrong, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}><Text style={{ color: colors.red, fontSize: 10, fontWeight: '700' }}>REVOKED</Text></View>}
+                    {m.discord_id ? (
+                      <View style={{ backgroundColor: 'rgba(88,101,242,0.18)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                        <Text style={{ color: '#a5b4fc', fontSize: 9, fontWeight: '700' }}>🎮 {m.discord_id.slice(-6)}</Text>
+                      </View>
+                    ) : null}
                   </View>
                   <Text style={styles.userEmail} numberOfLines={1} ellipsizeMode="tail">{u.email}</Text>
                 </View>
+                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
               </View>
-              {!u.is_admin && (
-                <View style={{ flexDirection: 'row', gap: 6 }}>
-                  <TouchableOpacity
-                    onPress={() => toggleMidasAccess(u)}
-                    style={[styles.actionBtnRevoke, { backgroundColor: midasMap[u.id]?.enabled ? 'rgba(255,210,74,0.18)' : 'rgba(255,210,74,0.06)', borderColor: 'rgba(255,210,74,0.4)' }]}
-                  >
-                    <Ionicons name={midasMap[u.id]?.connected ? 'flash' : 'sparkles-outline'} size={11} color="#FFD24A" />
-                    <Text style={[styles.actionBtnRevokeTxt, { color: '#FFD24A', marginLeft: 4 }]}>
-                      {midasMap[u.id]?.enabled ? 'Midas ON' : 'Midas OFF'}
-                    </Text>
-                  </TouchableOpacity>
-                  {revoked ? (
-                    <TouchableOpacity onPress={() => reinstateUser(u)} style={styles.actionBtnReinstate}>
-                      <Text style={styles.actionBtnReinstateTxt}>Reinstate</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity onPress={() => revokeUser(u)} style={styles.actionBtnRevoke}>
-                      <Text style={styles.actionBtnRevokeTxt}>Revoke</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              )}
-            </View>
+            </TouchableOpacity>
           );
         })}
       </ScrollView>
+
+      {/* User Detail Modal */}
+      <Modal
+        visible={!!detailUser}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setDetailUser(null)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+            <View style={dmStyles.header}>
+              <TouchableOpacity onPress={() => setDetailUser(null)}><Ionicons name="close" size={24} color="#fff" /></TouchableOpacity>
+              <Text style={dmStyles.headerTitle}>User Details</Text>
+              <View style={{ width: 24 }} />
+            </View>
+            <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+              {detailUser && (() => {
+                const m = midasMap[detailUser.id] || {};
+                return (
+                  <>
+                    {/* Avatar header */}
+                    <View style={{ alignItems: 'center', marginBottom: 20 }}>
+                      <View style={[styles.avatarBadge, { width: 72, height: 72, borderRadius: 36 }, detailUser.is_admin && styles.avatarBadgeAdmin]}>
+                        <Text style={{ color: '#fff', fontSize: 28, fontWeight: '800' }}>{detailUser.username?.charAt(0)?.toUpperCase() || '?'}</Text>
+                      </View>
+                      <Text style={{ color: '#fff', fontSize: 20, fontWeight: '700', marginTop: 10 }}>{detailUser.username}</Text>
+                      <Text style={{ color: '#9CA3AF', fontSize: 13 }}>{detailUser.email}</Text>
+                      {detailUser.is_admin && <View style={[styles.adminBadge, { marginTop: 6 }]}><Text style={styles.adminBadgeText}>Admin</Text></View>}
+                    </View>
+
+                    {/* Account section */}
+                    <Text style={dmStyles.sectionLabel}>Account</Text>
+                    <Row label="User ID" value={detailUser.id} mono />
+                    <Row label="Email" value={detailUser.email} />
+                    <Row label="Username" value={detailUser.username} />
+                    <Row label="Created" value={detailUser.created_at ? new Date(detailUser.created_at).toLocaleString() : '—'} />
+                    <Row label="Status" value={detailUser.is_revoked ? 'Revoked' : 'Active'} valueColor={detailUser.is_revoked ? colors.red : colors.green} />
+
+                    {/* Discord section */}
+                    <Text style={dmStyles.sectionLabel}>Discord Link</Text>
+                    <Text style={dmStyles.helpTxt}>Link this user's app account to their Discord ID so the Midas bot can match alerts to their Tastytrade account.</Text>
+                    <View style={{ marginTop: 10 }}>
+                      <Text style={dmStyles.inputLabel}>DISCORD ID</Text>
+                      <TextInput
+                        style={dmStyles.input}
+                        placeholder="e.g. 123456789012345678"
+                        placeholderTextColor="#555"
+                        value={discordDraft}
+                        onChangeText={setDiscordDraft}
+                        keyboardType="numeric"
+                        autoCorrect={false}
+                      />
+                      {m.discord_display_name ? (
+                        <Text style={[dmStyles.helpTxt, { marginTop: 6 }]}>Display name on Discord: <Text style={{ color: '#fff', fontWeight: '600' }}>{m.discord_display_name}</Text></Text>
+                      ) : null}
+                      <TouchableOpacity
+                        style={[dmStyles.saveBtn, savingDiscord && { opacity: 0.5 }]}
+                        onPress={saveDiscordLink}
+                        disabled={savingDiscord}
+                      >
+                        {savingDiscord
+                          ? <ActivityIndicator color="#000" />
+                          : <Text style={dmStyles.saveBtnTxt}>{discordDraft.trim() ? 'SAVE DISCORD LINK' : 'UNLINK DISCORD'}</Text>}
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Midas section */}
+                    <Text style={dmStyles.sectionLabel}>Midas</Text>
+                    <Row label="Access Enabled" value={m.enabled ? 'Yes' : 'No'} valueColor={m.enabled ? '#FFD24A' : '#9CA3AF'} />
+                    <Row label="Tastytrade Connected" value={m.connected ? 'Yes' : 'No'} valueColor={m.connected ? colors.green : '#9CA3AF'} />
+                    <Row label="Auto-Trade" value={m.auto_trade ? 'ON' : 'OFF'} valueColor={m.auto_trade ? '#FFD24A' : '#9CA3AF'} />
+                    <Row label="Account #" value={m.account_number || '—'} mono />
+                    <Row label="Balance" value={m.account_balance != null ? `$${Number(m.account_balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'} />
+                    <Row label="Limit Price" value={`$${Number(m.limit_price || 5).toFixed(2)}`} />
+                    <Row label="Client Secret" value={m.client_secret_mask || '—'} mono />
+                    <Row label="Refresh Token" value={m.refresh_token_mask || '—'} mono />
+                    <Row label="Connected At" value={m.connected_at ? new Date(m.connected_at).toLocaleString() : '—'} />
+
+                    {/* Actions */}
+                    {!detailUser.is_admin && (
+                      <View style={{ marginTop: 20, gap: 8 }}>
+                        <TouchableOpacity
+                          onPress={() => toggleMidasAccess(detailUser)}
+                          style={[dmStyles.actionBtn, { backgroundColor: m.enabled ? 'rgba(255,210,74,0.18)' : 'rgba(255,210,74,0.06)', borderColor: '#FFD24A' }]}
+                        >
+                          <Ionicons name={m.enabled ? 'sparkles' : 'sparkles-outline'} size={16} color="#FFD24A" />
+                          <Text style={[dmStyles.actionBtnTxt, { color: '#FFD24A' }]}>{m.enabled ? 'Disable Midas Access' : 'Enable Midas Access'}</Text>
+                        </TouchableOpacity>
+                        {detailUser.is_revoked ? (
+                          <TouchableOpacity
+                            onPress={() => { reinstateUser(detailUser); setDetailUser(null); }}
+                            style={[dmStyles.actionBtn, { backgroundColor: colors.greenBg, borderColor: colors.green }]}
+                          >
+                            <Ionicons name="checkmark-circle" size={16} color={colors.green} />
+                            <Text style={[dmStyles.actionBtnTxt, { color: colors.green }]}>Reinstate Account</Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <TouchableOpacity
+                            onPress={() => { revokeUser(detailUser); setDetailUser(null); }}
+                            style={[dmStyles.actionBtn, { backgroundColor: colors.redBg, borderColor: colors.red }]}
+                          >
+                            <Ionicons name="close-circle" size={16} color={colors.red} />
+                            <Text style={[dmStyles.actionBtnTxt, { color: colors.red }]}>Revoke Account</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    )}
+                  </>
+                );
+              })()}
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
+
+function Row({ label, value, valueColor, mono }: { label: string; value: string; valueColor?: string; mono?: boolean }) {
+  return (
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)', gap: 12 }}>
+      <Text style={{ color: '#9CA3AF', fontSize: 12, fontWeight: '600', flex: 1 }}>{label}</Text>
+      <Text
+        selectable
+        style={{ color: valueColor || '#fff', fontSize: 13, fontWeight: '600', flexShrink: 1, textAlign: 'right', fontFamily: mono ? (Platform.OS === 'ios' ? 'Menlo' : 'monospace') : undefined }}
+      >{value}</Text>
+    </View>
+  );
+}
+
+const dmStyles = StyleSheet.create({
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' },
+  headerTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  sectionLabel: { color: '#FFD24A', fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginTop: 22, marginBottom: 8 },
+  helpTxt: { color: '#9CA3AF', fontSize: 12, lineHeight: 17 },
+  inputLabel: { color: '#9CA3AF', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginBottom: 4 },
+  input: { backgroundColor: '#141416', color: '#fff', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, borderWidth: 1, borderColor: '#1C1C20', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  saveBtn: { backgroundColor: '#FFD24A', borderRadius: 10, paddingVertical: 13, marginTop: 12, alignItems: 'center' },
+  saveBtnTxt: { color: '#1A0F00', fontSize: 13, fontWeight: '900', letterSpacing: 1 },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13, borderRadius: 10, borderWidth: 1 },
+  actionBtnTxt: { fontSize: 13, fontWeight: '800', letterSpacing: 0.5 },
+});
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#000' },
