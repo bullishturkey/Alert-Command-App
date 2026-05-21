@@ -57,6 +57,7 @@ export default function MidasScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [refreshToken, setRefreshToken] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -98,15 +99,20 @@ export default function MidasScreen() {
 
   const handleConnect = async () => {
     if (!clientSecret.trim() || !refreshToken.trim()) {
-      Alert.alert('Missing fields', 'Both Client Secret and Refresh Token are required.');
+      Alert.alert('Missing fields', 'Client Secret and Refresh Token are both required (Client ID is recommended).');
       return;
     }
     setSubmitting(true);
     try {
       await apiFetch('/api/midas/connect', {
         method: 'POST',
-        body: JSON.stringify({ client_secret: clientSecret.trim(), refresh_token: refreshToken.trim() }),
+        body: JSON.stringify({
+          client_id: clientId.trim(),
+          client_secret: clientSecret.trim(),
+          refresh_token: refreshToken.trim(),
+        }),
       });
+      setClientId('');
       setClientSecret('');
       setRefreshToken('');
       Alert.alert('Connected', 'Tastytrade account linked. Loading balance…');
@@ -223,7 +229,17 @@ export default function MidasScreen() {
             </View>
 
             <View style={s.card}>
-              <Text style={s.label}>TASTYTRADE CLIENT SECRET</Text>
+              <Text style={s.label}>TASTYTRADE CLIENT ID</Text>
+              <TextInput
+                style={s.input}
+                placeholder="Public Client ID from your OAuth app"
+                placeholderTextColor={colors.textMuted}
+                value={clientId}
+                onChangeText={setClientId}
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+              <Text style={[s.label, { marginTop: 16 }]}>TASTYTRADE CLIENT SECRET</Text>
               <TextInput
                 style={s.input}
                 placeholder="Paste your OAuth client secret"
@@ -278,8 +294,8 @@ export default function MidasScreen() {
                   <Text style={s.bodyMute}>Click <Text style={s.bold}>Create Application</Text>. Check ALL scopes. Add this callback URL exactly:</Text>
                   <View style={s.codeBox}><Text style={s.code}>http://localhost:8000</Text></View>
                 </Step>
-                <Step n={3} title="Copy your Client Secret">
-                  <Text style={s.bodyMute}>After creating the app you'll see the Client Secret <Text style={s.bold}>once</Text>. Copy and paste it in the field above.</Text>
+                <Step n={3} title="Copy Client ID & Client Secret">
+                  <Text style={s.bodyMute}>After creating the app you'll see your <Text style={s.bold}>Client ID</Text> (public) and <Text style={s.bold}>Client Secret</Text> (shown only <Text style={s.bold}>once</Text>). Copy both and paste them in the fields above.</Text>
                 </Step>
                 <Step n={4} title="Create a Grant → get Refresh Token">
                   <Text style={s.bodyMute}>Click <Text style={s.bold}>Manage → Create Grant</Text>. Authorize. Copy the Refresh Token shown and paste it above.</Text>

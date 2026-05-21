@@ -394,15 +394,15 @@ export default function AdminScreen() {
         {/* Stats */}
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
-            <Text style={styles.statValue}>{stats.users}</Text>
+            <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}>{stats.users}</Text>
             <Text style={styles.statLabel} numberOfLines={1} adjustsFontSizeToFit>Users</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statValue}>{stats.alerts}</Text>
+            <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}>{stats.alerts}</Text>
             <Text style={styles.statLabel} numberOfLines={1} adjustsFontSizeToFit>Alerts</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statValue}>{stats.messages}</Text>
+            <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}>{stats.messages}</Text>
             <Text style={styles.statLabel} numberOfLines={1} adjustsFontSizeToFit>Messages</Text>
           </View>
         </View>

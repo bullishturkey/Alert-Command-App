@@ -2784,23 +2784,27 @@ def _require_midas_key(x_midas_key: Optional[str]) -> None:
         raise HTTPException(status_code=403, detail='Invalid X-Midas-Key')
 
 
-async def _tastytrade_get_access_token(client_secret: str, refresh_token: str) -> Optional[str]:
-    """Exchange refresh_token for a short-lived access_token via Tastytrade OAuth."""
+async def _tastytrade_get_access_token(client_id: str, client_secret: str, refresh_token: str) -> Optional[str]:
+    """Exchange refresh_token for a short-lived access_token via Tastytrade OAuth.
+    Requires client_id (publicly-visible) + client_secret (shown once) + refresh_token."""
     if not client_secret or not refresh_token:
         return None
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
+            payload = {
+                'grant_type': 'refresh_token',
+                'refresh_token': refresh_token,
+                'client_secret': client_secret,
+            }
+            if client_id:
+                payload['client_id'] = client_id
             r = await client.post(
                 f"{TASTYTRADE_API_BASE}/oauth/token",
-                data={
-                    'grant_type': 'refresh_token',
-                    'refresh_token': refresh_token,
-                    'client_secret': client_secret,
-                },
+                data=payload,
                 headers={'Content-Type': 'application/x-www-form-urlencoded'},
             )
             if r.status_code != 200:
-                logger.warning(f"Tastytrade token exchange {r.status_code}: {r.text[:200]}")
+                logger.warning(f"Tastytrade token exchange {r.status_code}: {r.text[:300]}")
                 return None
             data = r.json() or {}
             token = data.get('access_token')
@@ -2812,13 +2816,14 @@ async def _tastytrade_get_access_token(client_secret: str, refresh_token: str) -
         return None
 
 
-async def _tastytrade_fetch_balance(client_secret: str, refresh_token: str) -> Dict[str, Any]:
-    """Fetch the user's primary account number + cash-balance. Returns {account_number, balance} or {}.
-    Uses Tastytrade REST API. Cached upstream by the calling endpoint."""
-    token = await _tastytrade_get_access_token(client_secret, refresh_token)
+async def _tastytrade_fetch_balance(client_id: str, client_secret: str, refresh_token: str) -> Dict[str, Any]:
+    """Fetch the user's primary account number + balance."""
+    token = await _tastytrade_get_access_token(client_id, client_secret, refresh_token)
     if not token:
         return {}
-    headers = {'Authorization': token, 'Accept': 'application/json'}
+    # OAuth access tokens require the "Bearer " prefix on the Authorization header
+    # (session tokens, by contrast, use the raw token).
+    headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/json'}
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             # 1) Get the user's accounts
@@ -2901,9 +2906,10 @@ async def midas_get_status(user=Depends(get_current_user)):
     account_number = doc.get('account_number') or ''
     is_connected = bool(doc.get('connected') and doc.get('tastytrade_refresh_token_enc'))
     if is_connected and needs_refresh:
+        ci = midas_decrypt(doc.get('tastytrade_client_id_enc') or '')
         cs = midas_decrypt(doc.get('tastytrade_client_secret_enc') or '')
         rt = midas_decrypt(doc.get('tastytrade_refresh_token_enc') or '')
-        res = await _tastytrade_fetch_balance(cs, rt)
+        res = await _tastytrade_fetch_balance(ci, cs, rt)
         if res:
             balance = res.get('balance')
             if res.get('account_number'):
@@ -2936,27 +2942,27 @@ async def midas_get_status(user=Depends(get_current_user)):
 
 @api_router.post("/midas/connect")
 async def midas_connect(body: dict = Body(...), user=Depends(get_current_user)):
-    """Save the user's Tastytrade OAuth client_secret + refresh_token (encrypted at rest)."""
+    """Save the user's Tastytrade OAuth client_id + client_secret + refresh_token (encrypted at rest)."""
     doc = await _ensure_midas_doc(user['id'])
     if not (doc.get('midas_enabled') or user.get('is_admin')):
         raise HTTPException(status_code=403, detail='Midas access not enabled on this account')
+    client_id = (body.get('client_id') or '').strip()
     client_secret = (body.get('client_secret') or '').strip()
     refresh_token = (body.get('refresh_token') or '').strip()
     if not client_secret or not refresh_token:
         raise HTTPException(status_code=400, detail='client_secret and refresh_token are required')
-    await db.midas_subscribers.update_one(
-        {'user_id': user['id']},
-        {'$set': {
-            'tastytrade_client_secret_enc': midas_encrypt(client_secret),
-            'tastytrade_refresh_token_enc': midas_encrypt(refresh_token),
-            'connected': True,
-            # null out balance so first /status call hits Tastytrade
-            'account_balance': None,
-            'balance_updated_at': None,
-            'connected_at': datetime.now(timezone.utc).isoformat(),
-        }},
-    )
-    logger.info(f"Midas: user {user['username']} connected Tastytrade")
+    update_doc: Dict[str, Any] = {
+        'tastytrade_client_secret_enc': midas_encrypt(client_secret),
+        'tastytrade_refresh_token_enc': midas_encrypt(refresh_token),
+        'connected': True,
+        'account_balance': None,
+        'balance_updated_at': None,
+        'connected_at': datetime.now(timezone.utc).isoformat(),
+    }
+    if client_id:
+        update_doc['tastytrade_client_id_enc'] = midas_encrypt(client_id)
+    await db.midas_subscribers.update_one({'user_id': user['id']}, {'$set': update_doc})
+    logger.info(f"Midas: user {user['username']} connected Tastytrade (client_id provided: {bool(client_id)})")
     return {'status': 'connected'}
 
 
@@ -2966,6 +2972,7 @@ async def midas_disconnect(user=Depends(get_current_user)):
     await db.midas_subscribers.update_one(
         {'user_id': user['id']},
         {'$set': {
+            'tastytrade_client_id_enc': '',
             'tastytrade_client_secret_enc': '',
             'tastytrade_refresh_token_enc': '',
             'connected': False,
@@ -3172,6 +3179,7 @@ async def midas_subscribers(x_midas_key: Optional[str] = Header(None)):
         out.append({
             'discord_id': d.get('discord_id', ''),
             'user_id': d.get('user_id', ''),
+            'tastytrade_client_id': midas_decrypt(d.get('tastytrade_client_id_enc') or ''),
             'tastytrade_client_secret': midas_decrypt(d.get('tastytrade_client_secret_enc') or ''),
             'tastytrade_refresh_token': midas_decrypt(d.get('tastytrade_refresh_token_enc') or ''),
             'limit_price': float(d.get('limit_price') or 5.0),
