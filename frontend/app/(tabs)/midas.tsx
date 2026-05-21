@@ -44,6 +44,8 @@ type Status = {
   limit_price?: number;
   auto_trade?: boolean;
   contracts?: number;
+  contracts_auto?: number;
+  custom_contracts?: number | null;
   client_secret_mask?: string;
   refresh_token_mask?: string;
 };
@@ -59,6 +61,9 @@ export default function MidasScreen() {
   const [refreshToken, setRefreshToken] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [limitDraft, setLimitDraft] = useState('5.00');
+  const [contractsDraft, setContractsDraft] = useState('');
+  const [balanceHidden, setBalanceHidden] = useState(false);
+  const [useCustomContracts, setUseCustomContracts] = useState(false);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -69,6 +74,13 @@ export default function MidasScreen() {
       if (st.status === 'fulfilled') {
         setStatus(st.value);
         if (st.value?.limit_price != null) setLimitDraft(Number(st.value.limit_price).toFixed(2));
+        if (st.value?.custom_contracts) {
+          setUseCustomContracts(true);
+          setContractsDraft(String(st.value.custom_contracts));
+        } else {
+          setUseCustomContracts(false);
+          setContractsDraft(String(st.value?.contracts_auto || ''));
+        }
       }
       if (tr.status === 'fulfilled') setTrades(tr.value.trades || []);
     } catch {
@@ -139,6 +151,26 @@ export default function MidasScreen() {
     try {
       await apiFetch('/api/midas/settings', { method: 'POST', body: JSON.stringify({ limit_price: lp }) });
       setStatus(s => s ? { ...s, limit_price: lp } : s);
+    } catch (e: any) { Alert.alert('Error', e?.message || 'Failed to update'); }
+  };
+
+  const saveCustomContracts = async () => {
+    if (!useCustomContracts) {
+      // User toggled OFF — clear the custom override so the auto rubric kicks in
+      try {
+        await apiFetch('/api/midas/settings', { method: 'POST', body: JSON.stringify({ custom_contracts: null }) });
+        await fetchAll();
+      } catch (e: any) { Alert.alert('Error', e?.message || 'Failed to update'); }
+      return;
+    }
+    const c = parseInt(contractsDraft, 10);
+    if (isNaN(c) || c < 1 || c > 100) {
+      Alert.alert('Invalid', 'Contracts must be between 1 and 100');
+      return;
+    }
+    try {
+      await apiFetch('/api/midas/settings', { method: 'POST', body: JSON.stringify({ custom_contracts: c }) });
+      setStatus(s => s ? { ...s, custom_contracts: c, contracts: c } : s);
     } catch (e: any) { Alert.alert('Error', e?.message || 'Failed to update'); }
   };
 
@@ -289,12 +321,24 @@ export default function MidasScreen() {
           <Text style={s.bigVal}>{status?.account_number || '—'}</Text>
           <View style={s.row2col}>
             <View style={{ flex: 1 }}>
-              <Text style={s.label}>BALANCE</Text>
-              <Text style={[s.bigVal, { color: colors.green }]}>{balanceTxt}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={s.label}>BALANCE</Text>
+                <TouchableOpacity onPress={() => setBalanceHidden(h => !h)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name={balanceHidden ? 'eye-off-outline' : 'eye-outline'} size={14} color={colors.textTertiary} />
+                </TouchableOpacity>
+              </View>
+              <Text style={[s.bigVal, { color: colors.green }]}>
+                {balanceHidden ? '••••••' : balanceTxt}
+              </Text>
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.label}>CONTRACTS / TRADE</Text>
               <Text style={[s.bigVal, { color: GOLD }]}>{status?.contracts ?? '—'}</Text>
+              {status?.custom_contracts ? (
+                <Text style={{ color: GOLD, fontSize: 10, fontWeight: '700', marginTop: -2 }}>CUSTOM</Text>
+              ) : (
+                <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: -2 }}>Auto from rubric</Text>
+              )}
             </View>
           </View>
           <View style={s.maskBox}>
@@ -337,6 +381,53 @@ export default function MidasScreen() {
               <Text style={s.goldBtnSmTxt}>SAVE</Text>
             </TouchableOpacity>
           </View>
+        </View>
+
+        {/* Custom Contract Override */}
+        <View style={s.card}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, paddingRight: 12 }}>
+              <Text style={s.cardTitle}>Override Contracts</Text>
+              <Text style={s.bodyMute}>
+                {useCustomContracts
+                  ? `Manual: ${status?.custom_contracts || contractsDraft || '—'} contracts per trade.`
+                  : `Following the position-sizing rubric below (auto: ${status?.contracts_auto ?? '—'}).`}
+              </Text>
+            </View>
+            <Switch
+              value={useCustomContracts}
+              onValueChange={(v) => {
+                setUseCustomContracts(v);
+                if (!v) {
+                  // Immediately clear server-side override
+                  apiFetch('/api/midas/settings', { method: 'POST', body: JSON.stringify({ custom_contracts: null }) })
+                    .then(fetchAll).catch(() => null);
+                }
+              }}
+              trackColor={{ false: colors.border, true: 'rgba(255,210,74,0.18)' }}
+              thumbColor={useCustomContracts ? GOLD : colors.textTertiary}
+              ios_backgroundColor={colors.border}
+            />
+          </View>
+          {useCustomContracts && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 }}>
+              <View style={s.inputPill}>
+                <Ionicons name="layers-outline" size={16} color={GOLD} style={{ marginRight: 6 }} />
+                <TextInput
+                  style={s.inputInline}
+                  value={contractsDraft}
+                  onChangeText={setContractsDraft}
+                  keyboardType="number-pad"
+                  placeholder="e.g. 2"
+                  placeholderTextColor={colors.textMuted}
+                  maxLength={3}
+                />
+              </View>
+              <TouchableOpacity style={s.goldBtnSm} onPress={saveCustomContracts}>
+                <Text style={s.goldBtnSmTxt}>SAVE</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {/* Position Sizing Rubric */}

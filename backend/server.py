@@ -2800,9 +2800,13 @@ async def _tastytrade_get_access_token(client_secret: str, refresh_token: str) -
                 headers={'Content-Type': 'application/x-www-form-urlencoded'},
             )
             if r.status_code != 200:
-                logger.warning(f"Tastytrade token exchange failed: {r.status_code}")
+                logger.warning(f"Tastytrade token exchange {r.status_code}: {r.text[:200]}")
                 return None
-            return (r.json() or {}).get('access_token')
+            data = r.json() or {}
+            token = data.get('access_token')
+            if not token:
+                logger.warning(f"Tastytrade token exchange returned no access_token: {data}")
+            return token
     except Exception as e:
         logger.warning(f"Tastytrade token exchange error: {e}")
         return None
@@ -2912,7 +2916,9 @@ async def midas_get_status(user=Depends(get_current_user)):
                     'balance_updated_at': datetime.now(timezone.utc).isoformat(),
                 }},
             )
-    contracts = midas_contracts_for_balance(balance or 0)
+    contracts_auto = midas_contracts_for_balance(balance or 0)
+    custom_contracts = doc.get('custom_contracts')
+    contracts = int(custom_contracts) if custom_contracts else contracts_auto
     return {
         'midas_enabled': True,
         'connected': is_connected,
@@ -2921,6 +2927,8 @@ async def midas_get_status(user=Depends(get_current_user)):
         'limit_price': float(doc.get('limit_price') or 5.00),
         'auto_trade': bool(doc.get('auto_trade')),
         'contracts': contracts,
+        'contracts_auto': contracts_auto,
+        'custom_contracts': custom_contracts,
         'client_secret_mask': midas_mask(midas_decrypt(doc.get('tastytrade_client_secret_enc') or '')) if is_connected else '',
         'refresh_token_mask': midas_mask(midas_decrypt(doc.get('tastytrade_refresh_token_enc') or '')) if is_connected else '',
     }
@@ -2988,6 +2996,19 @@ async def midas_update_settings(body: dict = Body(...), user=Depends(get_current
             updates['limit_price'] = round(lp, 2)
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail='limit_price must be a number')
+    if 'custom_contracts' in body:
+        # null/0 → use the auto rubric; otherwise a positive int override
+        val = body['custom_contracts']
+        if val is None or val == 0 or val == '':
+            updates['custom_contracts'] = None
+        else:
+            try:
+                c = int(val)
+                if c < 1 or c > 100:
+                    raise HTTPException(status_code=400, detail='custom_contracts must be between 1 and 100')
+                updates['custom_contracts'] = c
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail='custom_contracts must be an integer')
     if updates:
         await db.midas_subscribers.update_one({'user_id': user['id']}, {'$set': updates})
     return {'status': 'updated', 'updates': updates}
@@ -3145,6 +3166,9 @@ async def midas_subscribers(x_midas_key: Optional[str] = Header(None)):
     docs = await cursor.to_list(2000)
     out = []
     for d in docs:
+        bal = d.get('account_balance')
+        custom = d.get('custom_contracts')
+        contracts = int(custom) if custom else midas_contracts_for_balance(bal or 0)
         out.append({
             'discord_id': d.get('discord_id', ''),
             'user_id': d.get('user_id', ''),
@@ -3153,7 +3177,9 @@ async def midas_subscribers(x_midas_key: Optional[str] = Header(None)):
             'limit_price': float(d.get('limit_price') or 5.0),
             'auto_trade': bool(d.get('auto_trade')),
             'account_number': d.get('account_number', ''),
-            'account_balance': d.get('account_balance'),
+            'account_balance': bal,
+            'contracts': contracts,
+            'custom_contracts': custom,
         })
     return {'subscribers': out, 'count': len(out)}
 

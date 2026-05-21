@@ -8,8 +8,11 @@ import { useAuth } from '../../contexts/AuthContext';
 import { apiFetch } from '../../utils/api';
 import { colors, spacing, radius } from '../../theme';
 
+import { useRouter } from 'expo-router';
+
 export default function SettingsScreen() {
   const { user, logout, isGuest, deleteAccount, updateUser } = useAuth();
+  const router = useRouter();
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
   const [checkingPush, setCheckingPush] = useState(true);
@@ -383,7 +386,14 @@ export default function SettingsScreen() {
             </>
           )}
           {isGuest && (
-            <TouchableOpacity style={st.signInBtn} onPress={logout} activeOpacity={0.7}>
+            <TouchableOpacity
+              style={st.signInBtn}
+              onPress={async () => {
+                await logout();
+                router.replace('/');
+              }}
+              activeOpacity={0.7}
+            >
               <Ionicons name="log-in-outline" size={20} color={colors.green} />
               <Text style={st.signInTxt}>Sign In / Create Account</Text>
             </TouchableOpacity>
