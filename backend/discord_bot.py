@@ -211,9 +211,21 @@ async def _start_client(
             STATE['total_forwarded'] += 1
             STATE['last_message_at'] = datetime.now(timezone.utc).isoformat()
             logger.info(f"Discord→App alert forwarded: {parsed['title'][:50]}")
+            # Acknowledge in the Discord channel with a reaction so traders can see
+            # the alert was picked up and pushed to the Alerts Command app.
+            try:
+                ack = {'bullish': '🟢', 'bearish': '🔴'}.get(parsed.get('type'), '🤖')
+                await msg.add_reaction(ack)
+            except Exception as _re:
+                logger.warning(f"Failed to add Discord ack reaction: {_re}")
         except Exception as e:
             logger.error(f"Discord message forwarding failed: {e}")
             STATE['last_error'] = str(e)
+            # Reaction to indicate failure (only if we managed to attribute the cause)
+            try:
+                await msg.add_reaction('⚠️')
+            except Exception:
+                pass
 
     try:
         await _client.start(token)
