@@ -1858,12 +1858,9 @@ async def _generate_weekly_recap() -> Dict[str, Any]:
     gainers_text = "\n".join(f"- {g['symbol']} ({g['name']}): {g['change_pct']:+.2f}%" for g in movers.get('top_gainers', [])[:3])
     losers_text = "\n".join(f"- {l['symbol']} ({l['name']}): {l['change_pct']:+.2f}%" for l in movers.get('top_losers', [])[:3])
 
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"ndx-weekly-{_current_iso_week_key()}",
-        system_message="""You are a senior market analyst writing a weekend 'Week in Review' brief for a Nasdaq-100 (NDX) trading community.
+    import anthropic as _anthropic
+    _aclient = _anthropic.AsyncAnthropic(api_key=EMERGENT_LLM_KEY)
+    _weekly_system = """You are a senior market analyst writing a weekend 'Week in Review' brief for a Nasdaq-100 (NDX) trading community.
 Markets are closed; produce a concise, static recap of what happened this past week.
 
 Respond ONLY with valid JSON in this exact format:
@@ -1878,11 +1875,8 @@ Respond ONLY with valid JSON in this exact format:
 }
 
 Be direct, professional, trading-focused. No disclaimers."""
-    )
-    chat.with_model("anthropic", "claude-4-sonnet-20250514")
-    chat.with_params(timeout=25, num_retries=0)
 
-    user_msg = UserMessage(text=f"""Weekly market recap — produce JSON analysis.
+    user_msg_text = f"""Weekly market recap — produce JSON analysis.
 
 INDEX PERFORMANCE (week):
 {indexes_text or '(data unavailable)'}
@@ -1896,9 +1890,9 @@ TOP LOSERS (NDX-100 tracked, this week):
 KEY NEWS THIS WEEK:
 {news_text or '(no news available)'}
 
-Provide your JSON analysis.""")
+Provide your JSON analysis."""
 
-    # Sentiment via Claude (with its own 15s litellm timeout)
+    # Sentiment via Claude
     sentiment_data: Dict[str, Any] = {
         'overall_sentiment': 'neutral',
         'confidence': 0,
@@ -1909,7 +1903,16 @@ Provide your JSON analysis.""")
         'trade_bias': ''
     }
     try:
-        response = await chat.send_message(user_msg)
+        _weekly_response = await asyncio.wait_for(
+            _aclient.messages.create(
+                model='claude-sonnet-4-20250514',
+                max_tokens=1000,
+                system=_weekly_system,
+                messages=[{'role': 'user', 'content': user_msg_text}]
+            ),
+            timeout=25.0
+        )
+        response = _weekly_response.content[0].text
         resp_text = response.strip()
         if resp_text.startswith('```'):
             resp_text = resp_text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
@@ -1967,13 +1970,10 @@ async def _generate_daily_recap() -> Dict[str, Any]:
     gainers_text = "\n".join(f"- {g['symbol']} ({g['name']}): {g['change_pct']:+.2f}%" for g in movers.get('top_gainers', [])[:3])
     losers_text = "\n".join(f"- {l['symbol']} ({l['name']}): {l['change_pct']:+.2f}%" for l in movers.get('top_losers', [])[:3])
 
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-
+    import anthropic as _anthropic
+    _aclient_daily = _anthropic.AsyncAnthropic(api_key=EMERGENT_LLM_KEY)
     today_key = _current_trading_day_key()
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"ndx-daily-{today_key}",
-        system_message="""You are a senior market analyst writing a post-close 'Today's Recap' brief for a Nasdaq-100 (NDX) trading community.
+    _daily_system = """You are a senior market analyst writing a post-close 'Today's Recap' brief for a Nasdaq-100 (NDX) trading community.
 Markets just closed for the day; produce a concise, static recap of how today's session played out and what to watch tomorrow.
 
 Respond ONLY with valid JSON in this exact format:
@@ -1988,11 +1988,8 @@ Respond ONLY with valid JSON in this exact format:
 }
 
 Be direct, professional, trading-focused. No disclaimers."""
-    )
-    chat.with_model("anthropic", "claude-4-sonnet-20250514")
-    chat.with_params(timeout=25, num_retries=0)
 
-    user_msg = UserMessage(text=f"""Post-close recap for {today_key} — produce JSON analysis.
+    user_msg_text_daily = f"""Post-close recap for {today_key} — produce JSON analysis.
 
 TODAY'S INDEX PERFORMANCE:
 {indexes_text or '(data unavailable)'}
@@ -2006,7 +2003,7 @@ TOP LOSERS (NDX-100 tracked, today):
 KEY NEWS TODAY:
 {news_text or '(no news available)'}
 
-Provide your JSON analysis.""")
+Provide your JSON analysis."""
 
     sentiment_data: Dict[str, Any] = {
         'overall_sentiment': 'neutral',
@@ -2018,7 +2015,16 @@ Provide your JSON analysis.""")
         'trade_bias': ''
     }
     try:
-        response = await chat.send_message(user_msg)
+        _daily_response = await asyncio.wait_for(
+            _aclient_daily.messages.create(
+                model='claude-sonnet-4-20250514',
+                max_tokens=1000,
+                system=_daily_system,
+                messages=[{'role': 'user', 'content': user_msg_text_daily}]
+            ),
+            timeout=25.0
+        )
+        response = _daily_response.content[0].text
         resp_text = response.strip()
         if resp_text.startswith('```'):
             resp_text = resp_text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
@@ -2079,13 +2085,10 @@ async def _generate_ai_sentiment() -> Dict[str, Any]:
     if ndx_quote:
         ndx_info = f"NDX (Nasdaq 100) is currently at ${ndx_quote.get('price', 'N/A')}, change: {ndx_quote.get('change', 0)} ({ndx_quote.get('changePercent', 0)}%). Open: ${ndx_quote.get('open', 'N/A')}, High: ${ndx_quote.get('high', 'N/A')}, Low: ${ndx_quote.get('low', 'N/A')}."
 
-    # Call Claude via emergentintegrations with a hard timeout
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=f"ndx-sentiment-{datetime.now(timezone.utc).strftime('%Y%m%d%H')}",
-        system_message="""You are a senior market analyst for a Nasdaq-100 (NDX) trading community. 
+    # Call Claude directly via anthropic SDK
+    import anthropic as _anthropic
+    _aclient_live = _anthropic.AsyncAnthropic(api_key=EMERGENT_LLM_KEY)
+    _live_system = """You are a senior market analyst for a Nasdaq-100 (NDX) trading community.
 Your job is to analyze breaking financial news and market data to produce a concise, actionable market intelligence brief.
 
 IMPORTANT: Respond ONLY with valid JSON in this exact format:
@@ -2100,13 +2103,7 @@ IMPORTANT: Respond ONLY with valid JSON in this exact format:
 }
 
 Be direct, professional, and trading-focused. No disclaimers or caveats."""
-    )
-    chat.with_model("anthropic", "claude-4-sonnet-20250514")
-    # Raised to 25s timeout with launch-tier RAM headroom.
-    chat.with_params(timeout=25, num_retries=0)
-
-    user_message = UserMessage(
-        text=f"""Analyze the following market data and news for the NDX trading community:
+    _live_user_msg = f"""Analyze the following market data and news for the NDX trading community:
 
 MARKET DATA:
 {ndx_info}
@@ -2115,7 +2112,6 @@ BREAKING NEWS:
 {news_text}
 
 Provide your JSON analysis."""
-    )
 
     # Default fallback sentiment — used if Claude fails / times out so we still cache SOMETHING
     sentiment_data: Dict[str, Any] = {
@@ -2129,7 +2125,16 @@ Provide your JSON analysis."""
     }
     # Hard 20s timeout so a slow Claude response can never hang the endpoint
     try:
-        response = await asyncio.wait_for(chat.send_message(user_message), timeout=20.0)
+        _live_resp = await asyncio.wait_for(
+            _aclient_live.messages.create(
+                model='claude-sonnet-4-20250514',
+                max_tokens=1000,
+                system=_live_system,
+                messages=[{'role': 'user', 'content': _live_user_msg}]
+            ),
+            timeout=20.0
+        )
+        response = _live_resp.content[0].text
         try:
             resp_text = response.strip()
             if resp_text.startswith('```'):
