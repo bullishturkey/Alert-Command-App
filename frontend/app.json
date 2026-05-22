@@ -14,9 +14,12 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Scan QR codes for quick stock lookups",
         "UIBackgroundModes": [
+          "remote-notification",
           "remote-notification"
-        ]
-      }
+        ],
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "app.emergent.preflighthuba8026203"
     },
     "android": {
       "adaptiveIcon": {
@@ -62,6 +65,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "47b309b5-c27c-44cc-98fb-2585fa4ca630"
+      }
+    },
+    "owner": "bullishturkey"
   }
 }
