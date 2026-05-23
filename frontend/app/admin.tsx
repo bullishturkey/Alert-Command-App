@@ -606,24 +606,21 @@ export default function AdminScreen() {
                             <Text style={[dmStyles.actionBtnTxt, { color: colors.red }]}>Revoke Account</Text>
                           </TouchableOpacity>
                         )}
-                      </View>
-                      <TouchableOpacity
-                        onPress={() => { resetPassword(detailUser); }}
-                        style={[dmStyles.actionBtn, { backgroundColor: 'rgba(255,214,10,0.10)', borderColor: '#FFD60A', marginTop: 8 }]}
-                      >
-                        <Ionicons name="key" size={16} color="#FFD60A" />
-                        <Text style={[dmStyles.actionBtnTxt, { color: '#FFD60A' }]}>Reset Password</Text>
-                      </TouchableOpacity>
-                      {!detailUser.is_admin && (
+                        <TouchableOpacity
+                          onPress={() => { resetPassword(detailUser); }}
+                          style={[dmStyles.actionBtn, { backgroundColor: 'rgba(255,214,10,0.10)', borderColor: '#FFD60A' }]}
+                        >
+                          <Ionicons name="key" size={16} color="#FFD60A" />
+                          <Text style={[dmStyles.actionBtnTxt, { color: '#FFD60A' }]}>Reset Password</Text>
+                        </TouchableOpacity>
                         <TouchableOpacity
                           onPress={() => { deleteUser(detailUser); }}
-                          style={[dmStyles.actionBtn, { backgroundColor: 'rgba(255,59,48,0.10)', borderColor: '#FF3B30', marginTop: 8 }]}
+                          style={[dmStyles.actionBtn, { backgroundColor: 'rgba(255,59,48,0.10)', borderColor: '#FF3B30' }]}
                         >
                           <Ionicons name="trash" size={16} color="#FF3B30" />
                           <Text style={[dmStyles.actionBtnTxt, { color: '#FF3B30' }]}>Delete Account</Text>
                         </TouchableOpacity>
-                      )}
-                    </View>
+                      </View>
                     )}
                   </>
                 );
