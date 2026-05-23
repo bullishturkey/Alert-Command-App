@@ -623,6 +623,7 @@ export default function AdminScreen() {
                           <Text style={[dmStyles.actionBtnTxt, { color: '#FF3B30' }]}>Delete Account</Text>
                         </TouchableOpacity>
                       )}
+                    </View>
                     )}
                   </>
                 );
