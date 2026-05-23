@@ -2442,8 +2442,23 @@ async def _run_ndx_close_reclassify() -> dict:
             pass
         return None
 
+    # Emoji sets for color detection
+    _GREEN_EMOJI = {'🟢','✅','📈','⬆️','🚀','💚','🔝','💰','🤑','✔','🎯','🟩','▲','↑','🔼','💹','👍','🌙','⭐','🌟','💫'}
+    _RED_EMOJI   = {'🔴','❌','📉','⬇️','💔','🛑','⛔','📛','🟥','▼','↓','🔽','🚨','⚠️','👎','💀','☠️','🩸','🆘'}
+
+    def emoji_type(text: str):
+        if not text:
+            return None
+        for e in _GREEN_EMOJI:
+            if e in text:
+                return 'bullish'
+        for e in _RED_EMOJI:
+            if e in text:
+                return 'bearish'
+        return None
+
     all_alerts = await db.alerts.find(
-        {}, {'id': 1, 'price': 1, 'created_at': 1, 'type': 1}
+        {}, {'id': 1, 'price': 1, 'created_at': 1, 'type': 1, 'message': 1, 'title': 1}
     ).to_list(length=None)
 
     updated = 0
@@ -2451,33 +2466,39 @@ async def _run_ndx_close_reclassify() -> dict:
     skipped_no_data = 0
 
     for alert in all_alerts:
-        price = alert.get('price')
-        created_at = alert.get('created_at', '')
-        if not price:
-            skipped_no_price += 1
-            continue
-        try:
-            alert_price = float(str(price).replace(',', '').replace('$', '').strip())
-        except (ValueError, TypeError):
-            skipped_no_price += 1
-            continue
-        if alert_price <= 0:
-            skipped_no_price += 1
-            continue
+        # Step 1: Try emoji detection first
+        text = f"{alert.get('title','')} {alert.get('message','')}"
+        new_type = emoji_type(text)
 
-        date_str = str(created_at)[:10]
-        close = get_close(date_str)
-        if close is None:
-            skipped_no_data += 1
-            continue
+        # Step 2: Fall back to NDX close vs price
+        if new_type is None:
+            price = alert.get('price')
+            created_at = alert.get('created_at', '')
+            if not price:
+                skipped_no_price += 1
+                continue
+            try:
+                alert_price = float(str(price).replace(',', '').replace('$', '').strip())
+            except (ValueError, TypeError):
+                skipped_no_price += 1
+                continue
+            if alert_price <= 0:
+                skipped_no_price += 1
+                continue
 
-        if close > alert_price:
-            new_type = 'bullish'
-        elif close < alert_price:
-            new_type = 'bearish'
-        else:
-            skipped_no_data += 1
-            continue
+            date_str = str(created_at)[:10]
+            close = get_close(date_str)
+            if close is None:
+                skipped_no_data += 1
+                continue
+
+            if close > alert_price:
+                new_type = 'bullish'
+            elif close < alert_price:
+                new_type = 'bearish'
+            else:
+                skipped_no_data += 1
+                continue
 
         await db.alerts.update_one({'id': alert['id']}, {'$set': {'type': new_type}})
         updated += 1
