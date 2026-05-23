@@ -2573,6 +2573,20 @@ async def admin_restore_user(user_id: str, user=Depends(get_admin_user)):
     logger.info(f"User restored: {target.get('email', user_id)} by admin {user.get('email')}")
     return {'status': 'restored', 'user_id': user_id}
 
+@api_router.post("/admin/users/{user_id}/reset-password")
+async def admin_reset_password(user_id: str, body: dict = Body(...), user=Depends(get_admin_user)):
+    """Admin: Reset a user password"""
+    new_password = (body.get('new_password') or '').strip()
+    if not new_password or len(new_password) < 6:
+        raise HTTPException(status_code=400, detail='Password must be at least 6 characters')
+    target = await db.users.find_one({'id': user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail='User not found')
+    hashed = hash_password(new_password)
+    await db.users.update_one({'id': user_id}, {'': {'password_hash': hashed}})
+    logger.info(f"Password reset for {target.get('email', user_id)} by admin {user.get('email')}")
+    return {'status': 'ok', 'email': target.get('email')}
+
 @api_router.delete("/admin/users/{user_id}")
 async def admin_delete_user(user_id: str, user=Depends(get_admin_user)):
     """Admin: Permanently delete a user"""
@@ -2642,7 +2656,14 @@ async def _run_discord_import(token: str, channel_id: str, years_back: int = 2):
     """Background task: import all Discord messages from past N years into alerts collection."""
     global _discord_import_state
     import aiohttp
-    from discord_bot import parse_message as _parse_msg
+    def _parse_msg(text):
+        import re
+        price_match = re.search(r'NDX\s*[-–]\s*([\d,]+\.?\d*)', text, re.IGNORECASE)
+        price = float(price_match.group(1).replace(',', '')) if price_match else None
+        bullish = 'bullish' in text.lower() or 'bull' in text.lower()
+        bearish = 'bearish' in text.lower() or 'bear' in text.lower()
+        title = 'Bullish Alert' if bullish else ('Bearish Alert' if bearish else 'NDX Alert')
+        return {'title': title, 'ticker': 'NDX', 'price': price}
 
     _discord_import_state.update({
         'running': True, 'status': 'running', 'imported': 0,
@@ -2942,6 +2963,7 @@ async def midas_get_status(user=Depends(get_current_user)):
         'custom_contracts': custom_contracts,
         'client_secret_mask': midas_mask(midas_decrypt(doc.get('tastytrade_client_secret_enc') or '')) if is_connected else '',
         'refresh_token_mask': midas_mask(midas_decrypt(doc.get('tastytrade_refresh_token_enc') or '')) if is_connected else '',
+        'discord_id': doc.get('discord_id', ''),
     }
 
 
@@ -3021,6 +3043,10 @@ async def midas_update_settings(body: dict = Body(...), user=Depends(get_current
                 updates['custom_contracts'] = c
             except (TypeError, ValueError):
                 raise HTTPException(status_code=400, detail='custom_contracts must be an integer')
+    if 'discord_id' in body:
+        did = str(body['discord_id']).strip()
+        if did:
+            updates['discord_id'] = did
     if updates:
         await db.midas_subscribers.update_one({'user_id': user['id']}, {'$set': updates})
     return {'status': 'updated', 'updates': updates}
