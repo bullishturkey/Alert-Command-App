@@ -271,6 +271,45 @@ export default function AdminScreen() {
     } catch (e: any) { Alert.alert('Error', e.message); }
   };
 
+  const resetPassword = async (u: any) => {
+    Alert.prompt(
+      'Reset Password',
+      `Set a new password for ${u.username || u.email}:`,
+      async (newPassword) => {
+        if (!newPassword || newPassword.length < 6) {
+          Alert.alert('Error', 'Password must be at least 6 characters');
+          return;
+        }
+        try {
+          await apiFetch(`/api/admin/users/${u.id}/reset-password`, {
+            method: 'POST',
+            body: JSON.stringify({ new_password: newPassword })
+          });
+          Alert.alert('Done', `Password reset for ${u.email}`);
+        } catch (e: any) { Alert.alert('Error', e.message); }
+      },
+      'plain-text'
+    );
+  };
+
+  const deleteUser = async (u: any) => {
+    Alert.alert(
+      'Delete Account',
+      `Permanently delete ${u.username || u.email}? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: async () => {
+          try {
+            await apiFetch(`/api/admin/users/${u.id}`, { method: 'DELETE' });
+            setDetailUser(null);
+            fetchData();
+            Alert.alert('Done', 'Account deleted.');
+          } catch (e: any) { Alert.alert('Error', e.message); }
+        }}
+      ]
+    );
+  };
+
   if (loading) {
     return <View style={styles.center}><ActivityIndicator size="large" color={colors.green} /></View>;
   }
@@ -568,6 +607,22 @@ export default function AdminScreen() {
                           </TouchableOpacity>
                         )}
                       </View>
+                      <TouchableOpacity
+                        onPress={() => { resetPassword(detailUser); }}
+                        style={[dmStyles.actionBtn, { backgroundColor: 'rgba(255,214,10,0.10)', borderColor: '#FFD60A', marginTop: 8 }]}
+                      >
+                        <Ionicons name="key" size={16} color="#FFD60A" />
+                        <Text style={[dmStyles.actionBtnTxt, { color: '#FFD60A' }]}>Reset Password</Text>
+                      </TouchableOpacity>
+                      {!detailUser.is_admin && (
+                        <TouchableOpacity
+                          onPress={() => { deleteUser(detailUser); }}
+                          style={[dmStyles.actionBtn, { backgroundColor: 'rgba(255,59,48,0.10)', borderColor: '#FF3B30', marginTop: 8 }]}
+                        >
+                          <Ionicons name="trash" size={16} color="#FF3B30" />
+                          <Text style={[dmStyles.actionBtnTxt, { color: '#FF3B30' }]}>Delete Account</Text>
+                        </TouchableOpacity>
+                      )}
                     )}
                   </>
                 );

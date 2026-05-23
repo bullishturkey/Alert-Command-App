@@ -285,7 +285,7 @@ export default function PreflightScreen() {
                         <View style={st.moversCol}>
                           <View style={st.moversHeader}>
                             <Ionicons name="trending-up" size={11} color={colors.green} />
-                            <Text style={[st.moversTitle, { color: colors.green }]}>TOP GAINERS</Text>
+                            <Text style={[st.moversTitle, { color: colors.green }]}>TOP WINS</Text>
                           </View>
                           {recap.top_gainers.map((g: MoverRow, i: number) => (
                             <View key={i} style={st.moverRow}>
@@ -299,7 +299,7 @@ export default function PreflightScreen() {
                         <View style={st.moversCol}>
                           <View style={st.moversHeader}>
                             <Ionicons name="trending-down" size={11} color={colors.red} />
-                            <Text style={[st.moversTitle, { color: colors.red }]}>{aiMode === 'weekly_recap' ? 'BOTTOM 5' : 'TOP LOSERS'}</Text>
+                            <Text style={[st.moversTitle, { color: colors.red }]}>{aiMode === 'weekly_recap' ? 'BOTTOM 5' : 'TOP LOSSES'}</Text>
                           </View>
                           {recap.top_losers.map((l: MoverRow, i: number) => {
                             const isDown = l.change_pct < 0;

@@ -1305,7 +1305,7 @@ async def webhook_alert(
     
     # Send push notifications with formatted title (emoji + ticker + type + price)
     type_emoji = {'bullish': '🟢', 'bearish': '🔴', 'signal': '🟡'}.get(alert['type'], '🟡')
-    type_label = {'bullish': 'Winner', 'bearish': 'Loser', 'signal': 'Breakeven'}.get(alert['type'], 'Breakeven')
+    type_label = {'bullish': 'Win', 'bearish': 'Loss', 'signal': 'Breakeven'}.get(alert['type'], 'Breakeven')
     price_part = f" — ${price}" if price else ''
     push_title = f"{type_emoji} {alert['ticker']} {type_label}{price_part}".strip()
     await send_push_notifications(push_title, content or title, alert['id'])
@@ -3745,7 +3745,7 @@ async def startup():
                 try:
                     # Build a clean push title: "🟢 AAPL Winner — $172.50"
                     type_emoji = {'bullish': '🟢', 'bearish': '🔴', 'signal': '🟡'}.get(alert['type'], '🟡')
-                    type_label = {'bullish': 'Winner', 'bearish': 'Loser', 'signal': 'Breakeven'}.get(alert['type'], 'Breakeven')
+                    type_label = {'bullish': 'Win', 'bearish': 'Loss', 'signal': 'Breakeven'}.get(alert['type'], 'Breakeven')
                     ticker_part = alert['ticker'] or ''
                     price_part = f" — ${alert['price']}" if alert.get('price') else ''
                     push_title = f"{type_emoji} {ticker_part} {type_label}{price_part}".strip()
