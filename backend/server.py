@@ -1905,7 +1905,7 @@ Provide your JSON analysis."""
     try:
         _weekly_response = await asyncio.wait_for(
             _aclient.messages.create(
-                model='claude-sonnet-4-20250514',
+                model='claude-sonnet-4-5',
                 max_tokens=1000,
                 system=_weekly_system,
                 messages=[{'role': 'user', 'content': user_msg_text}]
@@ -2017,7 +2017,7 @@ Provide your JSON analysis."""
     try:
         _daily_response = await asyncio.wait_for(
             _aclient_daily.messages.create(
-                model='claude-sonnet-4-20250514',
+                model='claude-sonnet-4-5',
                 max_tokens=1000,
                 system=_daily_system,
                 messages=[{'role': 'user', 'content': user_msg_text_daily}]
@@ -2127,7 +2127,7 @@ Provide your JSON analysis."""
     try:
         _live_resp = await asyncio.wait_for(
             _aclient_live.messages.create(
-                model='claude-sonnet-4-20250514',
+                model='claude-sonnet-4-5',
                 max_tokens=1000,
                 system=_live_system,
                 messages=[{'role': 'user', 'content': _live_user_msg}]
