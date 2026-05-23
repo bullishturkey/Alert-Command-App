@@ -21,7 +21,7 @@ const alertColor = (type: string) => isBearish(type) ? colors.red : isBullish(ty
 const alertBg = (type: string) => isBearish(type) ? colors.redBg : isBullish(type) ? colors.greenBg : colors.yellowBg;
 const alertBorderColor = (type: string) =>
   isBearish(type) ? 'rgba(245,70,107,0.15)' : isBullish(type) ? 'rgba(0,212,160,0.15)' : 'rgba(255,214,10,0.15)';
-const alertLabel = (type: string) => isBearish(type) ? 'LOSER' : isBullish(type) ? 'WINNER' : 'BREAKEVEN';
+const alertLabel = (type: string) => isBearish(type) ? 'LOSS' : isBullish(type) ? 'WIN' : 'BREAKEVEN';
 const alertIcon = (type: string): any => isBearish(type) ? 'trending-down' : isBullish(type) ? 'trending-up' : 'remove';
 
 export default function AlertsScreen() {
@@ -243,7 +243,7 @@ export default function AlertsScreen() {
                     onPress={() => setNewType('bullish')}
                   >
                     <Ionicons name="trending-up" size={14} color={newType === 'bullish' ? colors.green : colors.textMuted} />
-                    <Text style={[st.typeTxt, newType === 'bullish' && st.typeTxtWin]}>WINNER</Text>
+                    <Text style={[st.typeTxt, newType === 'bullish' && st.typeTxtWin]}>WIN</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[st.typeBtn, newType === 'signal' && st.typeBtnBE]}
@@ -257,7 +257,7 @@ export default function AlertsScreen() {
                     onPress={() => setNewType('bearish')}
                   >
                     <Ionicons name="trending-down" size={14} color={newType === 'bearish' ? colors.red : colors.textMuted} />
-                    <Text style={[st.typeTxt, newType === 'bearish' && st.typeTxtLoss]}>LOSER</Text>
+                    <Text style={[st.typeTxt, newType === 'bearish' && st.typeTxtLoss]}>LOSS</Text>
                   </TouchableOpacity>
                 </View>
 
