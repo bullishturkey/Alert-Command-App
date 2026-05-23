@@ -2663,7 +2663,8 @@ async def _run_discord_import(token: str, channel_id: str, years_back: int = 2):
         bullish = 'bullish' in text.lower() or 'bull' in text.lower()
         bearish = 'bearish' in text.lower() or 'bear' in text.lower()
         title = 'Bullish Alert' if bullish else ('Bearish Alert' if bearish else 'NDX Alert')
-        return {'title': title, 'ticker': 'NDX', 'price': price}
+        alert_type = 'bullish' if bullish else ('bearish' if bearish else 'info')
+        return {'title': title, 'ticker': 'NDX', 'price': price, 'type': alert_type}
 
     _discord_import_state.update({
         'running': True, 'status': 'running', 'imported': 0,
@@ -2731,7 +2732,7 @@ async def _run_discord_import(token: str, channel_id: str, years_back: int = 2):
                         'id': str(uuid.uuid4()),
                         'title': parsed['title'],
                         'message': text,
-                        'type': 'info',
+                        'type': parsed.get('type', 'info'),
                         'ticker': parsed.get('ticker', 'NDX'),
                         'price': parsed.get('price'),
                         'severity': 'medium',
