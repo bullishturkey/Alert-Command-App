@@ -23,14 +23,15 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "foregroundImage": "./assets/ndx-logo.png",
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
       "permissions": [
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE"
-      ]
+      ],
+      "package": "com.ndxalerts.alertscommand"
     },
     "androidStatusBar": {
       "backgroundColor": "#000000",
