@@ -2619,7 +2619,7 @@ async def admin_assign_affiliate(user_id: str, body: dict = Body(...), user=Depe
         raise HTTPException(status_code=404, detail="User not found")
     await db.midas_subscribers.update_one(
         {"user_id": user_id},
-        {"": {"ref_code": ref_code}},
+        {"$set": {"ref_code": ref_code}},
         upsert=False
     )
     logger.info(f"Affiliate {ref_code} manually assigned to {target.get("email")} by admin")
