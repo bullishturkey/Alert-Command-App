@@ -2608,6 +2608,24 @@ async def admin_reset_password(user_id: str, body: dict = Body(...), user=Depend
     logger.info(f"Password reset for {target.get('email', user_id)} by admin {user.get('email')}")
     return {'status': 'ok', 'email': target.get('email')}
 
+@api_router.post("/admin/users/{user_id}/assign-affiliate")
+async def admin_assign_affiliate(user_id: str, body: dict = Body(...), user=Depends(get_admin_user)):
+    """Admin: manually assign a referral/affiliate code to a user."""
+    ref_code = (body.get("ref_code") or "").strip().upper()
+    if not ref_code:
+        raise HTTPException(status_code=400, detail="ref_code required")
+    target = await db.users.find_one({"id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    await db.midas_subscribers.update_one(
+        {"user_id": user_id},
+        {"": {"ref_code": ref_code}},
+        upsert=False
+    )
+    logger.info(f"Affiliate {ref_code} manually assigned to {target.get("email")} by admin")
+    return {"status": "ok", "user_id": user_id, "ref_code": ref_code}
+
+
 @api_router.delete("/admin/users/{user_id}")
 async def admin_delete_user(user_id: str, user=Depends(get_admin_user)):
     """Admin: Permanently delete a user"""
