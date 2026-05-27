@@ -1,4 +1,6 @@
 """Alerts Command - Trading Intelligence Platform Backend"""
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Body, Query
 from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
