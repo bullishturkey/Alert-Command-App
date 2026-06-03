@@ -1488,7 +1488,7 @@ async def get_video_categories(user=Depends(get_optional_user)):
 # =====================
 # WATCHLIST ENDPOINTS
 # =====================
-DEFAULT_WATCHLIST = ['QQQ', 'NVDA', 'MSFT', 'AAPL', 'AMZN', 'META', 'TSLA', 'AMD', 'AVGO', 'GOOGL']
+DEFAULT_WATCHLIST = ['NDX', 'QQQ', 'SPY', 'IWM', 'GLD', 'AAPL', 'NVDA', 'MSFT', 'AMZN', 'META', 'GOOG', 'TSLA', 'JPM', 'COIN', 'TSM', 'VIX', 'UVXY', 'SQQQ', 'HOOD', 'MRVL']
 
 @api_router.get("/watchlist")
 async def get_watchlist(user=Depends(get_current_user)):
