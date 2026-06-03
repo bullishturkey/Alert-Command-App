@@ -2933,7 +2933,7 @@ async def _ensure_midas_doc(user_id: str) -> Dict[str, Any]:
     if not doc:
         doc = {
             'user_id': user_id,
-            'midas_enabled': False,
+            'midas_enabled': True,
             'connected': False,
             'tastytrade_client_secret_enc': '',
             'tastytrade_refresh_token_enc': '',
@@ -2954,7 +2954,7 @@ async def _ensure_midas_doc(user_id: str) -> Dict[str, Any]:
 async def midas_get_status(user=Depends(get_current_user)):
     """Returns the current user's Midas configuration + live balance (cached 5m)."""
     doc = await _ensure_midas_doc(user['id'])
-    enabled = bool(doc.get('midas_enabled') or user.get('is_admin'))
+    enabled = bool(doc.get('midas_enabled') != False or user.get('is_admin'))
     if not enabled:
         return {
             'midas_enabled': False,
@@ -3013,7 +3013,7 @@ async def midas_get_status(user=Depends(get_current_user)):
 async def midas_connect(body: dict = Body(...), user=Depends(get_current_user)):
     """Save the user's Tastytrade OAuth client_id + client_secret + refresh_token (encrypted at rest)."""
     doc = await _ensure_midas_doc(user['id'])
-    if not (doc.get('midas_enabled') or user.get('is_admin')):
+    if not (doc.get('midas_enabled') != False or user.get('is_admin')):
         raise HTTPException(status_code=403, detail='Midas access not enabled on this account')
     client_id = (body.get('client_id') or '').strip()
     client_secret = (body.get('client_secret') or '').strip()
@@ -3059,7 +3059,7 @@ async def midas_disconnect(user=Depends(get_current_user)):
 async def midas_update_settings(body: dict = Body(...), user=Depends(get_current_user)):
     """Update auto_trade toggle and/or limit_price."""
     doc = await _ensure_midas_doc(user['id'])
-    if not (doc.get('midas_enabled') or user.get('is_admin')):
+    if not (doc.get('midas_enabled') != False or user.get('is_admin')):
         raise HTTPException(status_code=403, detail='Midas access not enabled')
     updates: Dict[str, Any] = {}
     if 'auto_trade' in body:
@@ -3098,7 +3098,7 @@ async def midas_update_settings(body: dict = Body(...), user=Depends(get_current
 async def midas_my_trades(user=Depends(get_current_user), limit: int = 100):
     """Return the trade history for the current user."""
     doc = await _ensure_midas_doc(user['id'])
-    if not (doc.get('midas_enabled') or user.get('is_admin')):
+    if not (doc.get('midas_enabled') != False or user.get('is_admin')):
         return {'trades': []}
     cursor = db.midas_trades.find({'user_id': user['id']}, {'_id': 0}).sort('timestamp', -1).limit(min(max(limit, 1), 500))
     trades = await cursor.to_list(length=limit)
