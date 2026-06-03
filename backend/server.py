@@ -2606,7 +2606,7 @@ async def admin_reset_password(user_id: str, body: dict = Body(...), user=Depend
     if not target:
         raise HTTPException(status_code=404, detail='User not found')
     hashed = hash_password(new_password)
-    await db.users.update_one({'id': user_id}, {'': {'password_hash': hashed}})
+    await db.users.update_one({'id': user_id}, {'$set': {'password_hash': hashed}})
     logger.info(f"Password reset for {target.get('email', user_id)} by admin {user.get('email')}")
     return {'status': 'ok', 'email': target.get('email')}
 
