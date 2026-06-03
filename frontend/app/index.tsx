@@ -14,6 +14,31 @@ export default function AuthScreen() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState('');
+
+  const handleForgotPassword = async () => {
+    const trimmed = forgotEmail.trim().toLowerCase();
+    if (!trimmed) { setForgotError('Please enter your email'); return; }
+    setForgotLoading(true);
+    setForgotError('');
+    try {
+      const API_URL = 'https://alert-command-app.onrender.com/api';
+      const res = await fetch(`${API_URL}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: trimmed }),
+      });
+      setForgotSent(true);
+    } catch (e: any) {
+      setForgotError('Something went wrong. Try again.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
   const [rememberMe, setRememberMe] = useState(true);
 
   if (isLoading) {
@@ -115,6 +140,12 @@ export default function AuthScreen() {
             </TouchableOpacity>
 
             {isLogin && (
+              <TouchableOpacity onPress={() => { setShowForgot(true); setForgotSent(false); setForgotEmail(''); setForgotError(''); }} style={styles.forgotLink}>
+                <Text style={styles.forgotLinkText}>Forgot Password?</Text>
+              </TouchableOpacity>
+            )}
+
+            {isLogin && (
               <TouchableOpacity
                 testID="remember-me-toggle"
                 style={styles.rememberRow}
@@ -146,6 +177,46 @@ export default function AuthScreen() {
           <Text style={styles.disclaimer}>Alerts Command is an independent, third-party tool.{'\n'}Not affiliated with Nasdaq, Inc. or any stock exchange.</Text>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Forgot Password Modal */}
+      {showForgot && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Reset Password</Text>
+            {forgotSent ? (
+              <>
+                <Text style={styles.modalBody}>Check your email for a reset link. It expires in 1 hour.</Text>
+                <TouchableOpacity style={styles.modalBtn} onPress={() => setShowForgot(false)}>
+                  <Text style={styles.modalBtnText}>Done</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.modalBody}>Enter your email and we'll send you a reset link.</Text>
+                {forgotError ? <Text style={styles.modalError}>{forgotError}</Text> : null}
+                <View style={styles.inputRow}>
+                  <Ionicons name="mail-outline" size={18} color={colors.textTertiary} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="you@example.com"
+                    placeholderTextColor={colors.textMuted}
+                    value={forgotEmail}
+                    onChangeText={setForgotEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                </View>
+                <TouchableOpacity style={[styles.modalBtn, forgotLoading && styles.submitBtnDisabled]} onPress={handleForgotPassword} disabled={forgotLoading}>
+                  {forgotLoading ? <ActivityIndicator color="#000" /> : <Text style={styles.modalBtnText}>Send Reset Link</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowForgot(false)} style={styles.modalCancel}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -215,5 +286,16 @@ const styles = StyleSheet.create({
   serverResetBtn: { flex: 1, backgroundColor: '#2A2A2E', borderRadius: 8, paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: '#444' },
   serverResetBtnText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
 
+  forgotLink: { alignItems: 'center', marginTop: 12, paddingVertical: 4 },
+  forgotLinkText: { color: colors.green, fontSize: 13, fontWeight: '600' },
+  modalOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  modalCard: { backgroundColor: colors.surface, borderRadius: 16, padding: 24, width: '100%', borderWidth: 1, borderColor: colors.border },
+  modalTitle: { color: colors.textPrimary, fontSize: 20, fontWeight: '700', marginBottom: 8 },
+  modalBody: { color: colors.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: 16 },
+  modalError: { color: colors.red, fontSize: 13, marginBottom: 12 },
+  modalBtn: { backgroundColor: colors.green, borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginTop: 12 },
+  modalBtnText: { color: '#000', fontSize: 15, fontWeight: '700' },
+  modalCancel: { alignItems: 'center', marginTop: 12, paddingVertical: 6 },
+  modalCancelText: { color: colors.textTertiary, fontSize: 14 },
   disclaimer: { color: colors.textMuted, fontSize: 10, textAlign: 'center', marginTop: 24, lineHeight: 15, opacity: 0.6 },
 });

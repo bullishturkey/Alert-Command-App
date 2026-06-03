@@ -32,6 +32,41 @@ db_name = os.environ.get('DB_NAME', 'ndx_command')
 FINNHUB_KEY = os.environ.get('FINNHUB_API_KEY', '')
 FMP_KEY = os.environ.get('FMP_API_KEY', '')
 JWT_SECRET = os.environ.get('JWT_SECRET', 'alerts-command-jwt-secret-2026-secure')
+
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+
+async def send_password_reset_email(name: str, email: str, token: str):
+    """Send password reset email via Resend."""
+    if not RESEND_API_KEY:
+        return
+    reset_link = f"alertscommand://reset-password?token={token}"
+    html = f"""
+    <div style="background:#0a0a0a;color:#fff;font-family:sans-serif;padding:40px;max-width:560px;margin:0 auto">
+      <h1 style="font-size:22px;margin-bottom:8px">Reset Your Password</h1>
+      <p style="color:#888;font-size:15px;line-height:1.6">Hi {name}, tap the button below to reset your Alerts Command password. This link expires in 1 hour.</p>
+      <div style="text-align:center;margin:32px 0">
+        <a href="{reset_link}" style="background:#00E5A0;color:#000;padding:14px 32px;border-radius:8px;font-weight:700;font-size:15px;text-decoration:none;display:inline-block">Reset Password →</a>
+      </div>
+      <p style="color:#555;font-size:13px">If you didn't request this, ignore this email.</p>
+      <p style="color:#555;font-size:12px;margin-top:32px">Alerts Command · Trading Intelligence Platform</p>
+    </div>
+    """
+    try:
+        async with httpx.AsyncClient() as c:
+            await c.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "from": "Alerts Command <noreply@ndxalerts.com>",
+                    "to": [email],
+                    "subject": "Reset your Alerts Command password",
+                    "html": html,
+                },
+                timeout=10
+            )
+    except Exception as e:
+        logger.warning(f"Password reset email failed: {e}")
+
 WEBHOOK_SECRET = os.environ.get('WEBHOOK_SECRET', '')
 
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
@@ -526,6 +561,49 @@ async def register(data: UserRegister):
         'token': token,
         'user': {'id': user_id, 'email': data.email, 'username': data.username, 'is_admin': False, 'created_at': user_doc['created_at']}
     }
+
+
+@api_router.post("/auth/forgot-password")
+async def forgot_password(body: dict = Body(...)):
+    email = (body.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(400, "Email required")
+    user = await db.users.find_one({"email": email})
+    if not user:
+        return {"message": "If that email exists, a reset link has been sent."}
+    token = secrets.token_urlsafe(32)
+    expires = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    await db.password_resets.update_one(
+        {"email": email},
+        {"$set": {"token": token, "expires": expires, "email": email}},
+        upsert=True
+    )
+    await send_password_reset_email(user.get("name", user.get("username", "there")), email, token)
+    return {"message": "If that email exists, a reset link has been sent."}
+
+@api_router.post("/auth/reset-password")
+async def reset_password_route(body: dict = Body(...)):
+    token = (body.get("token") or "").strip()
+    new_password = (body.get("password") or "").strip()
+    if not token or not new_password:
+        raise HTTPException(400, "Token and password required")
+    if len(new_password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+    record = await db.password_resets.find_one({"token": token})
+    if not record:
+        raise HTTPException(400, "Invalid or expired reset link")
+    try:
+        expires = datetime.fromisoformat(record["expires"])
+        if datetime.now(timezone.utc) > expires:
+            raise HTTPException(400, "Reset link has expired. Please request a new one.")
+    except ValueError:
+        raise HTTPException(400, "Invalid reset link")
+    await db.users.update_one(
+        {"email": record["email"]},
+        {"$set": {"password_hash": hash_password(new_password)}}
+    )
+    await db.password_resets.delete_one({"token": token})
+    return {"message": "Password reset successfully. You can now log in."}
 
 @api_router.post("/auth/login")
 async def login(data: UserLogin):
