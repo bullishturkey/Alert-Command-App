@@ -3098,6 +3098,26 @@ async def midas_connect(body: dict = Body(...), user=Depends(get_current_user)):
     refresh_token = (body.get('refresh_token') or '').strip()
     if not client_secret or not refresh_token:
         raise HTTPException(status_code=400, detail='client_secret and refresh_token are required')
+
+    # Fetch account number from Tastytrade to check for duplicates
+    try:
+        bal_res = await _tastytrade_fetch_balance(client_id, client_secret, refresh_token)
+        if bal_res and bal_res.get('account_number'):
+            acct_num = bal_res['account_number']
+            # Check if another user already has this account number
+            existing = await db.midas_subscribers.find_one({
+                'account_number': acct_num,
+                'user_id': {'$ne': user['id']},
+                'connected': True,
+            })
+            if existing:
+                logger.warning(f"Duplicate account number {acct_num} attempted by user {user['id']}")
+                raise HTTPException(status_code=409, detail='This Tastytrade account is already connected to another account. Please contact support.')
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Could not verify account number uniqueness: {e}")
+
     update_doc: Dict[str, Any] = {
         'tastytrade_client_secret_enc': midas_encrypt(client_secret),
         'tastytrade_refresh_token_enc': midas_encrypt(refresh_token),
@@ -3323,7 +3343,14 @@ async def midas_subscribers(x_midas_key: Optional[str] = Header(None)):
     )
     docs = await cursor.to_list(2000)
     out = []
+    seen_accounts = set()  # Deduplicate by account_number to prevent double trades
     for d in docs:
+        acct = d.get('account_number', '')
+        if acct and acct in seen_accounts:
+            logger.warning(f"Duplicate account_number {acct} found in midas_subscribers — skipping to prevent double trade")
+            continue
+        if acct:
+            seen_accounts.add(acct)
         bal = d.get('account_balance')
         custom = d.get('custom_contracts')
         contracts = int(custom) if custom else midas_contracts_for_balance(bal or 0)
@@ -3335,7 +3362,7 @@ async def midas_subscribers(x_midas_key: Optional[str] = Header(None)):
             'tastytrade_refresh_token': midas_decrypt(d.get('tastytrade_refresh_token_enc') or ''),
             'limit_price': float(d.get('limit_price') or 5.0),
             'auto_trade': bool(d.get('auto_trade')),
-            'account_number': d.get('account_number', ''),
+            'account_number': acct,
             'account_balance': bal,
             'contracts': contracts,
             'custom_contracts': custom,
