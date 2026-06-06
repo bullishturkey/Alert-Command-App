@@ -2638,6 +2638,9 @@ async def delete_account(user=Depends(get_current_user)):
     await db.watchlists.delete_many({'user_id': user_id})
     await db.push_tokens.delete_many({'user_id': user_id})
     await db.messages.delete_many({'author_id': user_id})
+    await db.midas_subscribers.delete_many({'user_id': user_id})
+    await db.midas_trades.delete_many({'user_id': user_id})
+    await db.alerts.delete_many({'user_id': user_id})
     logger.info(f"Account deleted: {user.get('email', user_id)}")
     return {'status': 'deleted', 'message': 'Your account and all associated data have been permanently deleted.'}
 
@@ -2718,6 +2721,9 @@ async def admin_delete_user(user_id: str, user=Depends(get_admin_user)):
     await db.watchlists.delete_many({'user_id': user_id})
     await db.push_tokens.delete_many({'user_id': user_id})
     await db.messages.delete_many({'author_id': user_id})
+    await db.midas_subscribers.delete_many({'user_id': user_id})
+    await db.midas_trades.delete_many({'user_id': user_id})
+    await db.alerts.delete_many({'user_id': user_id})
     logger.info(f"User deleted by admin: {target.get('email', user_id)}")
     return {'status': 'deleted', 'user_id': user_id}
 
