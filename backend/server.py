@@ -1372,7 +1372,7 @@ async def webhook_alert(
         'id': str(uuid.uuid4()),
         'title': title,
         'message': content or title,
-        'type': _detect_discord_type(content or title),
+        'type': 'signal',  # Entry alerts are always neutral — Win/Loss only determined at EOD after expiration
         'ticker': 'NDX',
         'severity': 'high',
         'source': 'webhook',
@@ -1383,11 +1383,9 @@ async def webhook_alert(
     await db.alerts.insert_one(alert)
     logger.info(f"Webhook alert received: {title}")
     
-    # Send push notifications with formatted title (emoji + ticker + type + price)
-    type_emoji = {'bullish': '🟢', 'bearish': '🔴', 'signal': '🟡'}.get(alert['type'], '🟡')
-    type_label = {'bullish': 'Win', 'bearish': 'Loss', 'signal': 'Breakeven'}.get(alert['type'], 'Breakeven')
+    # Send push notifications — entry alerts are always 🟡 Signal (not Win/Loss — that's EOD)
     price_part = f" — ${price}" if price else ''
-    push_title = f"{type_emoji} {alert['ticker']} {type_label}{price_part}".strip()
+    push_title = f"🟡 NDX Trade Alert{price_part}".strip()
     await send_push_notifications(push_title, content or title, alert['id'])
     
     return {'status': 'ok', 'alert_id': alert['id']}
@@ -3886,7 +3884,7 @@ async def startup():
                     'id': str(uuid.uuid4()),
                     'title': parsed['title'],
                     'message': parsed['message'],
-                    'type': parsed.get('type', 'signal'),
+                    'type': 'signal',  # NDX entry alerts are always neutral — Win/Loss set only at EOD
                     'ticker': parsed.get('ticker') or 'NDX',
                     'severity': 'high',
                     'source': 'discord',
@@ -3896,12 +3894,10 @@ async def startup():
                 }
                 await db.alerts.insert_one(alert)
                 try:
-                    # Build a clean push title: "🟢 AAPL Winner — $172.50"
-                    type_emoji = {'bullish': '🟢', 'bearish': '🔴', 'signal': '🟡'}.get(alert['type'], '🟡')
-                    type_label = {'bullish': 'Win', 'bearish': 'Loss', 'signal': 'Breakeven'}.get(alert['type'], 'Breakeven')
-                    ticker_part = alert['ticker'] or ''
+                    # Build a clean push title — always 🟡 for entry alerts
+                    ticker_part = alert['ticker'] or 'NDX'
                     price_part = f" — ${alert['price']}" if alert.get('price') else ''
-                    push_title = f"{type_emoji} {ticker_part} {type_label}{price_part}".strip()
+                    push_title = f"🟡 {ticker_part} Trade Alert{price_part}".strip()
                     # Body: original message (stripped of redundant emoji/title leading line)
                     push_body = (alert.get('message') or alert['title'])
                     await send_push_notifications(push_title, push_body, alert['id'])
