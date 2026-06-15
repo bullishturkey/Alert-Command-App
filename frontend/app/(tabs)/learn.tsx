@@ -6,9 +6,24 @@ import { apiFetch, timeAgo } from '../../utils/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { colors, spacing, radius } from '../../theme';
 
-let WebView: any = null;
+let YoutubePlayer: any = null;
 if (Platform.OS !== 'web') {
-  WebView = require('react-native-webview').WebView;
+  try { YoutubePlayer = require('react-native-youtube-iframe').default; } catch (e) {}
+}
+
+// Extract YouTube video ID from any youtube URL format
+function getYouTubeId(url: string): string | null {
+  if (!url) return null;
+  const patterns = [
+    /youtu\.be\/([\w-]{11})/,
+    /youtube\.com\/watch\?v=([\w-]{11})/,
+    /youtube\.com\/embed\/([\w-]{11})/,
+  ];
+  for (const p of patterns) {
+    const m = url.match(p);
+    if (m) return m[1];
+  }
+  return null;
 }
 
 interface Video {
@@ -108,11 +123,7 @@ export default function LearnScreen() {
   // Video Player Modal
   const renderPlayer = () => {
     if (!playingVideo) return null;
-    const embedHtml = `<!DOCTYPE html>
-<html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#000;overflow:hidden}
-iframe{width:100vw;height:100vh;border:none}</style></head>
-<body><iframe src="${playingVideo.embed_url}" allowfullscreen allow="autoplay;encrypted-media;picture-in-picture"></iframe></body></html>`;
+    const ytId = getYouTubeId(playingVideo.url || playingVideo.embed_url || '');
 
     return (
       <Modal visible={true} animationType="slide" presentationStyle="fullScreen">
@@ -125,20 +136,21 @@ iframe{width:100vw;height:100vh;border:none}</style></head>
             <View style={{ width: 38 }} />
           </View>
           <View style={styles.playerContainer}>
-            {Platform.OS === 'web' ? (
+            {ytId && YoutubePlayer ? (
+              <YoutubePlayer
+                height={220}
+                videoId={ytId}
+                play={true}
+                webViewProps={{
+                  allowsInlineMediaPlayback: true,
+                  mediaPlaybackRequiresUserAction: false,
+                }}
+              />
+            ) : Platform.OS === 'web' ? (
               <iframe
                 src={playingVideo.embed_url}
                 style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#000' } as any}
                 allowFullScreen
-              />
-            ) : WebView ? (
-              <WebView
-                source={{ html: embedHtml }}
-                style={{ flex: 1, backgroundColor: '#000' }}
-                javaScriptEnabled
-                allowsInlineMediaPlayback
-                mediaPlaybackRequiresUserAction={false}
-                originWhitelist={['*']}
               />
             ) : (
               <View style={styles.noPlayer}>
@@ -152,7 +164,7 @@ iframe{width:100vw;height:100vh;border:none}</style></head>
               <Text style={[styles.catBadgeText, { color: CATEGORY_COLORS[playingVideo.category] || colors.textSecondary }]}>{playingVideo.category}</Text>
             </View>
             {playingVideo.description ? <Text style={styles.playerDesc}>{playingVideo.description}</Text> : null}
-            <Text style={styles.playerMeta}>Added by {playingVideo.created_by} \u2022 {timeAgo(playingVideo.created_at)}</Text>
+            <Text style={styles.playerMeta}>Added by {playingVideo.created_by} {'•'} {timeAgo(playingVideo.created_at)}</Text>
           </View>
         </SafeAreaView>
       </Modal>
