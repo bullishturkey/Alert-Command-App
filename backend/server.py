@@ -2927,7 +2927,7 @@ async def get_discord_import_status(user=Depends(get_admin_user)):
 #     X-Midas-Key header that matches WEBHOOK_SECRET.
 
 TASTYTRADE_API_BASE = os.environ.get('TASTYTRADE_API_BASE', 'https://api.tastyworks.com')
-_TT_BALANCE_TTL = 300  # 5 minutes
+_TT_BALANCE_TTL = 21600  # 6 hours (scheduler handles proactive refreshes)
 
 def _require_midas_key(x_midas_key: Optional[str]) -> None:
     if not WEBHOOK_SECRET or x_midas_key != WEBHOOK_SECRET:
@@ -3872,7 +3872,87 @@ async def startup():
                     logger.error(f"Market-open scheduler error: {e}")
                     await asyncio.sleep(3600)
 
+        
         asyncio.create_task(_market_open_scheduler())
+
+        # === Balance Sync scheduler — 9:30 AM, 12:00 PM, 4:00 PM ET on weekdays ===
+        # Proactively refreshes cached balances for all connected Tastytrade accounts
+        # so the app, dashboard, and affiliate portal always show current values.
+        async def _balance_sync_scheduler():
+            import pytz as _pytz
+            eastern = _pytz.timezone('America/New_York')
+            sync_times = [(9, 30), (12, 0), (16, 0)]  # ET: market open, midday, close
+            while True:
+                try:
+                    now_et = datetime.now(eastern)
+                    # Find the next upcoming sync time today or tomorrow
+                    target = None
+                    for (h, m) in sync_times:
+                        candidate = now_et.replace(hour=h, minute=m, second=0, microsecond=0)
+                        if candidate > now_et:
+                            target = candidate
+                            break
+                    if target is None:
+                        # All times passed today — jump to first slot tomorrow
+                        tomorrow = now_et + timedelta(days=1)
+                        target = tomorrow.replace(hour=sync_times[0][0], minute=sync_times[0][1], second=0, microsecond=0)
+                    # Skip weekends
+                    while target.weekday() >= 5:
+                        target = target + timedelta(days=1)
+                    sleep_secs = (target - now_et).total_seconds()
+                    logger.info(
+                        f"Balance sync scheduler: next run at "
+                        f"{target.strftime('%Y-%m-%d %H:%M %Z')}, "
+                        f"sleeping {sleep_secs/3600:.1f}h"
+                    )
+                    await asyncio.sleep(sleep_secs)
+                    logger.info("Balance sync scheduler: starting full account sweep...")
+                    # Fetch all connected midas_subscribers
+                    try:
+                        all_subs = await db.midas_subscribers.find(
+                            {
+                                'connected': True,
+                                'tastytrade_refresh_token_enc': {'$exists': True, '$ne': None},
+                            }
+                        ).to_list(length=None)
+                        ok_count = 0
+                        fail_count = 0
+                        for sub in all_subs:
+                            try:
+                                ci = midas_decrypt(sub.get('tastytrade_client_id_enc') or '')
+                                cs = midas_decrypt(sub.get('tastytrade_client_secret_enc') or '')
+                                rt = midas_decrypt(sub.get('tastytrade_refresh_token_enc') or '')
+                                if not (ci and cs and rt):
+                                    continue
+                                res = await _tastytrade_fetch_balance(ci, cs, rt)
+                                if res and res.get('balance') is not None:
+                                    update = {
+                                        'account_balance': res.get('balance'),
+                                        'balance_updated_at': datetime.now(timezone.utc).isoformat(),
+                                    }
+                                    if res.get('account_number'):
+                                        update['account_number'] = res['account_number']
+                                    await db.midas_subscribers.update_one(
+                                        {'_id': sub['_id']},
+                                        {'$set': update}
+                                    )
+                                    ok_count += 1
+                                else:
+                                    fail_count += 1
+                                    logger.warning(f"Balance sync: no balance returned for user_id={sub.get('user_id')}")
+                            except Exception as sub_e:
+                                fail_count += 1
+                                logger.error(f"Balance sync error for user_id={sub.get('user_id')}: {sub_e}")
+                        logger.info(f"Balance sync complete — {ok_count} ok, {fail_count} failed")
+                    except Exception as sweep_e:
+                        logger.error(f"Balance sync sweep error: {sweep_e}")
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"Balance sync scheduler error: {e}")
+                    await asyncio.sleep(3600)
+
+        asyncio.create_task(_balance_sync_scheduler())
 
         # === Start Discord bot (no-op if DISCORD_BOT_TOKEN not set or DISCORD_BOT_ENABLED=false) ===
         try:
