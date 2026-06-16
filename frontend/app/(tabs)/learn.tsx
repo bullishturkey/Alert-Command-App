@@ -126,8 +126,9 @@ export default function LearnScreen() {
     const ytId = getYouTubeId(playingVideo.url || playingVideo.embed_url || '');
 
     return (
-      <Modal visible={true} animationType="slide" presentationStyle="fullScreen">
+      <Modal visible={true} animationType="slide" presentationStyle="pageSheet">
         <SafeAreaView style={styles.playerSafe}>
+          <View style={styles.playerHandle} />
           <View style={styles.playerHeader}>
             <TouchableOpacity onPress={() => setPlayingVideo(null)} style={styles.playerCloseBtn}>
               <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
@@ -353,7 +354,8 @@ const styles = StyleSheet.create({
   emptyText: { color: colors.textTertiary, fontSize: 13, textAlign: 'center', lineHeight: 19 },
 
   // Player Modal
-  playerSafe: { flex: 1, backgroundColor: colors.bg },
+  playerSafe: { flex: 1, backgroundColor: colors.bg, justifyContent: 'flex-end' },
+  playerHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginTop: 12, marginBottom: 8 },
   playerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   playerCloseBtn: { width: 38, height: 38, borderRadius: 10, backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border },
   playerTitle: { flex: 1, color: colors.textPrimary, fontSize: 15, fontWeight: '700', textAlign: 'center', marginHorizontal: spacing.md },
