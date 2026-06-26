@@ -9,6 +9,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import uuid
+import secrets
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -38,7 +39,8 @@ RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 async def send_password_reset_email(name: str, email: str, token: str):
     """Send password reset email via Resend."""
     if not RESEND_API_KEY:
-        return
+        logger.error("RESEND_API_KEY is not set — password reset email cannot be sent.")
+        return False
     reset_link = f"alertscommand://reset-password?token={token}"
     html = f"""
     <div style="background:#0a0a0a;color:#fff;font-family:sans-serif;padding:40px;max-width:560px;margin:0 auto">
@@ -53,7 +55,7 @@ async def send_password_reset_email(name: str, email: str, token: str):
     """
     try:
         async with httpx.AsyncClient() as c:
-            await c.post(
+            resp = await c.post(
                 "https://api.resend.com/emails",
                 headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
                 json={
@@ -64,8 +66,14 @@ async def send_password_reset_email(name: str, email: str, token: str):
                 },
                 timeout=10
             )
+            if resp.status_code >= 400:
+                logger.error(f"Resend API error {resp.status_code} for {email}: {resp.text}")
+                return False
+            logger.info(f"Password reset email sent to {email} via Resend (status {resp.status_code})")
+            return True
     except Exception as e:
-        logger.warning(f"Password reset email failed: {e}")
+        logger.error(f"Password reset email exception for {email}: {e}")
+        return False
 
 WEBHOOK_SECRET = os.environ.get('WEBHOOK_SECRET', '')
 
@@ -568,8 +576,10 @@ async def forgot_password(body: dict = Body(...)):
     email = (body.get("email") or "").strip().lower()
     if not email:
         raise HTTPException(400, "Email required")
+    logger.info(f"Password reset requested for: {email}")
     user = await db.users.find_one({"email": email})
     if not user:
+        logger.warning(f"Password reset: no user found for email {email}")
         return {"message": "If that email exists, a reset link has been sent."}
     token = secrets.token_urlsafe(32)
     expires = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
@@ -578,7 +588,9 @@ async def forgot_password(body: dict = Body(...)):
         {"$set": {"token": token, "expires": expires, "email": email}},
         upsert=True
     )
-    await send_password_reset_email(user.get("name", user.get("username", "there")), email, token)
+    sent = await send_password_reset_email(user.get("name", user.get("username", "there")), email, token)
+    if not sent:
+        logger.error(f"Password reset email FAILED to send for {email}")
     return {"message": "If that email exists, a reset link has been sent."}
 
 @api_router.post("/auth/reset-password")
