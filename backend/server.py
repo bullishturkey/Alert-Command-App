@@ -3222,6 +3222,8 @@ async def midas_get_status(user=Depends(get_current_user)):
         'client_secret_mask': midas_mask(midas_decrypt(doc.get('tastytrade_client_secret_enc') or '')) if is_connected else '',
         'refresh_token_mask': midas_mask(midas_decrypt(doc.get('tastytrade_refresh_token_enc') or '')) if is_connected else '',
         'discord_id': doc.get('discord_id', ''),
+        'profit_target_pct': doc.get('profit_target_pct', None),
+        'eod_close_enabled': bool(doc.get('eod_close_enabled', False)),
     }
 
 
@@ -3325,9 +3327,100 @@ async def midas_update_settings(body: dict = Body(...), user=Depends(get_current
         did = str(body['discord_id']).strip()
         if did:
             updates['discord_id'] = did
+    if 'profit_target_pct' in body:
+        val = body['profit_target_pct']
+        if val is None or val == '':
+            updates['profit_target_pct'] = None
+        else:
+            try:
+                pct = float(val)
+                if pct < 1 or pct > 100:
+                    raise HTTPException(status_code=400, detail='profit_target_pct must be between 1 and 100')
+                updates['profit_target_pct'] = round(pct, 1)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail='profit_target_pct must be a number')
+    if 'eod_close_enabled' in body:
+        updates['eod_close_enabled'] = bool(body['eod_close_enabled'])
     if updates:
         await db.midas_subscribers.update_one({'user_id': user['id']}, {'$set': updates})
     return {'status': 'updated', 'updates': updates}
+
+
+@api_router.post("/midas/close-position")
+async def midas_close_position(user=Depends(get_current_user)):
+    """Close the user's current open put-credit spread position at market."""
+    doc = await _ensure_midas_doc(user['id'])
+    if not (doc.get('midas_enabled') != False or user.get('is_admin')):
+        raise HTTPException(status_code=403, detail='Midas access not enabled')
+    if not doc.get('connected') or not doc.get('tastytrade_refresh_token_enc'):
+        raise HTTPException(status_code=400, detail='Tastytrade account not connected')
+    ci = midas_decrypt(doc.get('tastytrade_client_id_enc') or '')
+    cs = midas_decrypt(doc.get('tastytrade_client_secret_enc') or '')
+    rt = midas_decrypt(doc.get('tastytrade_refresh_token_enc') or '')
+    token = await _tastytrade_get_access_token(ci, cs, rt)
+    if not token:
+        raise HTTPException(status_code=502, detail='Could not authenticate with Tastytrade')
+    headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/json', 'Content-Type': 'application/json'}
+    acc_number = doc.get('account_number')
+    if not acc_number:
+        # Re-fetch account number
+        res = await _tastytrade_fetch_balance(ci, cs, rt)
+        acc_number = res.get('account_number')
+    if not acc_number:
+        raise HTTPException(status_code=502, detail='Could not determine Tastytrade account number')
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            # Fetch open positions
+            rp = await client.get(
+                f"{TASTYTRADE_API_BASE}/accounts/{acc_number}/positions",
+                headers=headers,
+            )
+            if rp.status_code != 200:
+                raise HTTPException(status_code=502, detail=f'Could not fetch positions: {rp.status_code}')
+            positions = ((rp.json() or {}).get('data') or {}).get('items') or []
+            # Filter to option positions only
+            option_positions = [p for p in positions if p.get('instrument-type') == 'Equity Option']
+            if not option_positions:
+                raise HTTPException(status_code=404, detail='No open option positions found')
+            # Build closing legs — reverse every open leg: BUY_TO_OPEN → SELL_TO_CLOSE, SELL_TO_OPEN → BUY_TO_CLOSE
+            legs = []
+            for pos in option_positions:
+                symbol = pos.get('symbol')
+                qty = abs(int(pos.get('quantity', 1)))
+                direction = pos.get('quantity-direction', 'Long')
+                # If long (we bought it), sell to close; if short (we sold it), buy to close
+                action = 'Sell to Close' if direction == 'Long' else 'Buy to Close'
+                legs.append({
+                    'instrument-type': 'Equity Option',
+                    'symbol': symbol,
+                    'quantity': qty,
+                    'action': action,
+                })
+            if not legs:
+                raise HTTPException(status_code=404, detail='No closeable option legs found')
+            # Place market order to close
+            order_payload = {
+                'order-type': 'Market',
+                'time-in-force': 'Day',
+                'legs': legs,
+            }
+            ro = await client.post(
+                f"{TASTYTRADE_API_BASE}/accounts/{acc_number}/orders",
+                headers=headers,
+                json=order_payload,
+            )
+            if ro.status_code not in (200, 201):
+                logger.error(f"Close position order failed {ro.status_code}: {ro.text[:500]}")
+                raise HTTPException(status_code=502, detail=f'Order submission failed: {ro.status_code} — {ro.text[:200]}')
+            order_data = ro.json()
+            order_id = ((order_data.get('data') or {}).get('order') or {}).get('id') or str(order_data)
+            logger.info(f"Close-position market order placed for user {user['id']} — order {order_id}")
+            return {'status': 'ok', 'message': 'Market close order submitted', 'order_id': order_id, 'legs_closed': len(legs)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"midas_close_position error for {user['id']}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @api_router.get("/midas/trades")
@@ -3504,6 +3597,8 @@ async def midas_subscribers(x_midas_key: Optional[str] = Header(None)):
             'account_balance': bal,
             'contracts': contracts,
             'custom_contracts': custom,
+            'profit_target_pct': d.get('profit_target_pct', None),
+            'eod_close_enabled': bool(d.get('eod_close_enabled', False)),
         })
     return {'subscribers': out, 'count': len(out)}
 

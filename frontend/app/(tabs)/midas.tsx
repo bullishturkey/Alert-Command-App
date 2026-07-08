@@ -48,6 +48,8 @@ type Status = {
   custom_contracts?: number | null;
   client_secret_mask?: string;
   refresh_token_mask?: string;
+  profit_target_pct?: number | null;
+  eod_close_enabled?: boolean;
 };
 
 export default function MidasScreen() {
@@ -65,6 +67,10 @@ export default function MidasScreen() {
   const [contractsDraft, setContractsDraft] = useState('');
   const [balanceHidden, setBalanceHidden] = useState(false);
   const [useCustomContracts, setUseCustomContracts] = useState(false);
+  const [profitTargetDraft, setProfitTargetDraft] = useState('');
+  const [usesProfitTarget, setUsesProfitTarget] = useState(false);
+  const [eodCloseEnabled, setEodCloseEnabled] = useState(false);
+  const [closingPosition, setClosingPosition] = useState(false);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -82,6 +88,15 @@ export default function MidasScreen() {
           setUseCustomContracts(false);
           setContractsDraft(String(st.value?.contracts_auto || ''));
         }
+        // Profit target
+        if (st.value?.profit_target_pct != null) {
+          setUsesProfitTarget(true);
+          setProfitTargetDraft(String(st.value.profit_target_pct));
+        } else {
+          setUsesProfitTarget(false);
+          setProfitTargetDraft('');
+        }
+        setEodCloseEnabled(!!st.value?.eod_close_enabled);
       }
       if (tr.status === 'fulfilled') setTrades(tr.value.trades || []);
     } catch {
@@ -178,6 +193,61 @@ export default function MidasScreen() {
       await apiFetch('/api/midas/settings', { method: 'POST', body: JSON.stringify({ custom_contracts: c }) });
       setStatus(s => s ? { ...s, custom_contracts: c, contracts: c } : s);
     } catch (e: any) { Alert.alert('Error', e?.message || 'Failed to update'); }
+  };
+
+  const saveProfitTarget = async () => {
+    if (!usesProfitTarget) {
+      try {
+        await apiFetch('/api/midas/settings', { method: 'POST', body: JSON.stringify({ profit_target_pct: null }) });
+        setStatus(s => s ? { ...s, profit_target_pct: null } : s);
+      } catch (e: any) { Alert.alert('Error', e?.message || 'Failed to update'); }
+      return;
+    }
+    const pct = parseFloat(profitTargetDraft);
+    if (isNaN(pct) || pct < 1 || pct > 100) {
+      Alert.alert('Invalid', 'Profit target must be between 1% and 100%');
+      return;
+    }
+    try {
+      await apiFetch('/api/midas/settings', { method: 'POST', body: JSON.stringify({ profit_target_pct: pct }) });
+      setStatus(s => s ? { ...s, profit_target_pct: pct } : s);
+    } catch (e: any) { Alert.alert('Error', e?.message || 'Failed to update'); }
+  };
+
+  const toggleEodClose = async (val: boolean) => {
+    setEodCloseEnabled(val);
+    try {
+      await apiFetch('/api/midas/settings', { method: 'POST', body: JSON.stringify({ eod_close_enabled: val }) });
+      setStatus(s => s ? { ...s, eod_close_enabled: val } : s);
+    } catch (e: any) {
+      setEodCloseEnabled(!val);
+      Alert.alert('Error', e?.message || 'Failed to update');
+    }
+  };
+
+  const handleClosePosition = () => {
+    Alert.alert(
+      'Close Position at Market?',
+      'This will immediately submit a market order to close ALL open option positions on your Tastytrade account. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Close at Market', style: 'destructive',
+          onPress: async () => {
+            setClosingPosition(true);
+            try {
+              const res = await apiFetch('/api/midas/close-position', { method: 'POST' });
+              Alert.alert('Order Submitted', `Market close order placed successfully.\n\nLegs closed: ${res.legs_closed ?? '—'}\nOrder ID: ${res.order_id ?? '—'}`);
+              await fetchAll();
+            } catch (e: any) {
+              Alert.alert('Close Failed', e?.message || 'Could not submit close order. Please close manually in Tastytrade.');
+            } finally {
+              setClosingPosition(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   if (loading) {
@@ -378,6 +448,105 @@ export default function MidasScreen() {
           />
         </View>
 
+        {/* ── Close Position ── */}
+        <View style={[s.card, { borderColor: 'rgba(255,80,80,0.25)' }]}>
+          <View style={s.cardHeadRow}>
+            <MaterialCommunityIcons name="close-circle-outline" size={16} color={colors.red} />
+            <Text style={[s.cardTitle, { color: colors.red }]}>Close Position</Text>
+          </View>
+          <Text style={s.bodyMute}>
+            Submit a market order to close your entire open spread position immediately. Use this to exit at any time.
+          </Text>
+          <TouchableOpacity
+            style={[s.closeBtn, closingPosition && { opacity: 0.5 }]}
+            onPress={handleClosePosition}
+            disabled={closingPosition}
+          >
+            {closingPosition
+              ? <ActivityIndicator color="#fff" size="small" />
+              : (
+                <>
+                  <MaterialCommunityIcons name="close-circle" size={16} color="#fff" />
+                  <Text style={s.closeBtnTxt}>CLOSE AT MARKET</Text>
+                </>
+              )}
+          </TouchableOpacity>
+        </View>
+
+        {/* ── Profit Target ── */}
+        <View style={s.card}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, paddingRight: 12 }}>
+              <Text style={s.cardTitle}>Profit Target</Text>
+              <Text style={s.bodyMute}>
+                {usesProfitTarget && status?.profit_target_pct
+                  ? `Auto-close when ${status.profit_target_pct}% of max profit is captured.`
+                  : 'Automatically close your spread when a profit % target is reached.'}
+              </Text>
+            </View>
+            <Switch
+              value={usesProfitTarget}
+              onValueChange={(v) => {
+                setUsesProfitTarget(v);
+                if (!v) {
+                  apiFetch('/api/midas/settings', { method: 'POST', body: JSON.stringify({ profit_target_pct: null }) })
+                    .then(() => setStatus(s => s ? { ...s, profit_target_pct: null } : s))
+                    .catch(() => null);
+                }
+              }}
+              trackColor={{ false: colors.border, true: GOLD_DIM_STRONG }}
+              thumbColor={usesProfitTarget ? GOLD : colors.textTertiary}
+              ios_backgroundColor={colors.border}
+            />
+          </View>
+          {usesProfitTarget && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 }}>
+              <View style={s.inputPill}>
+                <Ionicons name="trending-up-outline" size={16} color={GOLD} style={{ marginRight: 6 }} />
+                <TextInput
+                  style={s.inputInline}
+                  value={profitTargetDraft}
+                  onChangeText={setProfitTargetDraft}
+                  keyboardType="decimal-pad"
+                  placeholder="e.g. 50"
+                  placeholderTextColor={colors.textMuted}
+                  maxLength={5}
+                />
+                <Text style={{ color: GOLD, fontWeight: '700', marginRight: 4 }}>%</Text>
+              </View>
+              <TouchableOpacity style={s.goldBtnSm} onPress={saveProfitTarget}>
+                <Text style={s.goldBtnSmTxt}>SAVE</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {/* ── EOD Auto-Close ── */}
+        <View style={[s.card, { borderColor: eodCloseEnabled ? 'rgba(255,210,74,0.35)' : colors.border }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, paddingRight: 12 }}>
+              <Text style={s.cardTitle}>EOD Auto-Close</Text>
+              <Text style={s.bodyMute}>
+                At <Text style={{ color: GOLD, fontWeight: '700' }}>12:49 PM PT</Text> (10 min before market close), automatically close your spread if it has{' '}
+                <Text style={{ color: GOLD, fontWeight: '700' }}>not captured at least 0.4%</Text> profit. Protects against holding into the final minutes.
+              </Text>
+            </View>
+            <Switch
+              value={eodCloseEnabled}
+              onValueChange={toggleEodClose}
+              trackColor={{ false: colors.border, true: GOLD_DIM_STRONG }}
+              thumbColor={eodCloseEnabled ? GOLD : colors.textTertiary}
+              ios_backgroundColor={colors.border}
+            />
+          </View>
+          {eodCloseEnabled && (
+            <View style={[s.eodActivePill]}>
+              <Ionicons name="time-outline" size={12} color={GOLD} />
+              <Text style={[s.statusTxt, { color: GOLD }]}>ACTIVE — CLOSES AT 12:49 PM PT IF &lt;0.4% PROFIT</Text>
+            </View>
+          )}
+        </View>
+
         {/* Limit Price */}
         <View style={s.card}>
           <Text style={s.cardTitle}>Limit Price</Text>
@@ -576,6 +745,13 @@ const s = StyleSheet.create({
   goldBtnSm: { backgroundColor: GOLD, paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10 },
   goldBtnSmTxt: { color: '#1A0F00', fontWeight: '900', fontSize: 12, letterSpacing: 1 },
   disconnect: { color: colors.red, fontSize: 12, fontWeight: '700' },
+
+  // Close position button
+  closeBtn: { backgroundColor: colors.red, borderRadius: 10, paddingVertical: 13, marginTop: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  closeBtnTxt: { color: '#fff', fontSize: 13, fontWeight: '900', letterSpacing: 1 },
+
+  // EOD active pill
+  eodActivePill: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: GOLD_DIM, borderWidth: 1, borderColor: GOLD_BORDER },
 
   // Help section
   helpHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 14, paddingHorizontal: 14, backgroundColor: GOLD_DIM, borderRadius: 10, marginTop: 4, borderWidth: 1, borderColor: GOLD_BORDER },
