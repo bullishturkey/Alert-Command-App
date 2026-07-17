@@ -3398,9 +3398,38 @@ async def midas_close_position(user=Depends(get_current_user)):
                 })
             if not legs:
                 raise HTTPException(status_code=404, detail='No closeable option legs found')
-            # Place market order to close
+            # Tastytrade blocks Market orders on multi-leg spreads.
+            # Fetch quotes for each leg and build a marketable limit price.
+            # Net price = sum of ask prices for Buy-to-Close legs minus sum of bid prices for Sell-to-Close legs.
+            net_price = 0.0
+            try:
+                symbols_param = '/'.join(p.get('symbol', '') for p in option_positions)
+                rq = await client.get(
+                    f"{TASTYTRADE_API_BASE}/market-data/options",
+                    headers=headers,
+                    params={'symbols[]': [p.get('symbol', '') for p in option_positions]},
+                )
+                if rq.status_code == 200:
+                    quote_items = ((rq.json() or {}).get('data') or {}).get('items') or []
+                    quote_map = {q.get('symbol'): q for q in quote_items}
+                    for leg in legs:
+                        sym = leg['symbol']
+                        q = quote_map.get(sym, {})
+                        if leg['action'] == 'Buy to Close':
+                            # Pay the ask to close short leg
+                            net_price += float(q.get('ask', q.get('mid', 0.10)))
+                        else:
+                            # Receive the bid to close long leg
+                            net_price -= float(q.get('bid', q.get('mid', 0.05)))
+                # Ensure positive price, round to nearest cent, add 5¢ buffer so it fills
+                net_price = max(round(abs(net_price) + 0.05, 2), 0.01)
+            except Exception as qe:
+                logger.warning(f"Could not fetch quotes for close-position, using fallback price: {qe}")
+                net_price = 0.10  # fallback — will likely fill on a near-expiry spread
             order_payload = {
-                'order-type': 'Market',
+                'order-type': 'Limit',
+                'price': net_price,
+                'price-effect': 'Debit',
                 'time-in-force': 'Day',
                 'legs': legs,
             }
