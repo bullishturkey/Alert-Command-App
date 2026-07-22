@@ -3343,6 +3343,23 @@ async def midas_update_settings(body: dict = Body(...), user=Depends(get_current
         updates['eod_close_enabled'] = bool(body['eod_close_enabled'])
     if updates:
         await db.midas_subscribers.update_one({'user_id': user['id']}, {'$set': updates})
+        # Audit log — record every settings change with old/new values and timestamp
+        audit_entries = []
+        now_ts = datetime.utcnow()
+        for field, new_val in updates.items():
+            old_val = doc.get(field)
+            audit_entries.append({
+                'user_id': user['id'],
+                'account_number': doc.get('account_number'),
+                'display_name': doc.get('display_name') or user.get('name') or user['id'],
+                'field': field,
+                'old_value': old_val,
+                'new_value': new_val,
+                'changed_at': now_ts,
+                'changed_by': 'user',  # 'user' = self-service, 'system' = bot/admin
+            })
+        if audit_entries:
+            await db.midas_audit_log.insert_many(audit_entries)
     return {'status': 'updated', 'updates': updates}
 
 
