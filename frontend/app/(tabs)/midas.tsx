@@ -154,12 +154,36 @@ export default function MidasScreen() {
   };
 
   const toggleAutoTrade = async (val: boolean) => {
-    setStatus(s => s ? { ...s, auto_trade: val } : s);
-    try {
-      await apiFetch('/api/midas/settings', { method: 'POST', body: JSON.stringify({ auto_trade: val }) });
-    } catch (e: any) {
-      setStatus(s => s ? { ...s, auto_trade: !val } : s);
-      Alert.alert('Error', e?.message || 'Failed to update');
+    if (val) {
+      // Show confirmation before enabling auto-trader
+      Alert.alert(
+        '⚠️ Enable Auto-Trader?',
+        'Midas will automatically place live trades on your Tastytrade account when an NDX alert fires.\n\nAre you sure you want to enable Auto-Trader?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Enable',
+            style: 'destructive',
+            onPress: async () => {
+              setStatus(s => s ? { ...s, auto_trade: true } : s);
+              try {
+                await apiFetch('/api/midas/settings', { method: 'POST', body: JSON.stringify({ auto_trade: true }) });
+              } catch (e: any) {
+                setStatus(s => s ? { ...s, auto_trade: false } : s);
+                Alert.alert('Error', e?.message || 'Failed to update');
+              }
+            },
+          },
+        ]
+      );
+    } else {
+      setStatus(s => s ? { ...s, auto_trade: val } : s);
+      try {
+        await apiFetch('/api/midas/settings', { method: 'POST', body: JSON.stringify({ auto_trade: val }) });
+      } catch (e: any) {
+        setStatus(s => s ? { ...s, auto_trade: !val } : s);
+        Alert.alert('Error', e?.message || 'Failed to update');
+      }
     }
   };
 
