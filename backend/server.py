@@ -3224,6 +3224,7 @@ async def midas_get_status(user=Depends(get_current_user)):
         'discord_id': doc.get('discord_id', ''),
         'profit_target_pct': doc.get('profit_target_pct', None),
         'eod_close_enabled': bool(doc.get('eod_close_enabled', False)),
+        'eod_close_threshold_pct': doc.get('eod_close_threshold_pct', 0.4),
     }
 
 
@@ -3341,6 +3342,18 @@ async def midas_update_settings(body: dict = Body(...), user=Depends(get_current
                 raise HTTPException(status_code=400, detail='profit_target_pct must be a number')
     if 'eod_close_enabled' in body:
         updates['eod_close_enabled'] = bool(body['eod_close_enabled'])
+    if 'eod_close_threshold_pct' in body:
+        val = body['eod_close_threshold_pct']
+        if val is None or val == '':
+            updates['eod_close_threshold_pct'] = None  # reset to default
+        else:
+            try:
+                pct = float(val)
+                if pct < 0 or pct > 100:
+                    raise HTTPException(status_code=400, detail='eod_close_threshold_pct must be 0–100')
+                updates['eod_close_threshold_pct'] = round(pct, 1)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail='eod_close_threshold_pct must be a number')
     if updates:
         await db.midas_subscribers.update_one({'user_id': user['id']}, {'$set': updates})
         # Audit log — record every settings change with old/new values and timestamp
@@ -3548,6 +3561,51 @@ async def admin_midas_link_discord(body: dict = Body(...), user=Depends(get_admi
 
 
 # ----- BOT-FACING ENDPOINTS (X-Midas-Key) -----
+
+@api_router.post("/midas/notify-user")
+async def midas_notify_user(body: dict = Body(...), x_midas_key: Optional[str] = Header(None)):
+    """Bot endpoint: send a push notification to a specific user by discord_id.
+    Body: { discord_id, title, message, data: {} }"""
+    _require_midas_key(x_midas_key)
+    discord_id = str(body.get('discord_id') or '').strip()
+    title = str(body.get('title') or 'NDX Alerts').strip()
+    message = str(body.get('message') or '').strip()
+    extra_data = body.get('data') or {}
+    if not discord_id or not message:
+        raise HTTPException(status_code=400, detail='discord_id and message are required')
+    # Find the user_id for this discord_id
+    sub = await db.midas_subscribers.find_one({'discord_id': discord_id}, {'user_id': 1})
+    if not sub:
+        return {'status': 'no_subscriber', 'sent': 0}
+    user_id = sub.get('user_id')
+    if not user_id:
+        return {'status': 'no_user_id', 'sent': 0}
+    # Find push tokens for this user
+    try:
+        from exponent_server_sdk import PushClient, PushMessage, PushServerError
+        token_docs = await db.push_tokens.find({'user_id': user_id}, {'token': 1}).to_list(20)
+        tokens = [d['token'] for d in token_docs if d.get('token')]
+        if not tokens:
+            return {'status': 'no_tokens', 'sent': 0}
+        messages = [PushMessage(
+            to=tok, title=title, body=message[:200],
+            data={'type': 'midas_trade', **extra_data},
+            sound='default', priority='high',
+        ) for tok in tokens]
+        def _publish():
+            return PushClient().publish_multiple(messages)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _publish)
+        logger.info(f"midas_notify_user: sent to {len(tokens)} device(s) for discord_id={discord_id}")
+        return {'status': 'ok', 'sent': len(tokens)}
+    except ImportError:
+        logger.warning("exponent_server_sdk not installed — push skipped")
+        return {'status': 'sdk_missing', 'sent': 0}
+    except Exception as e:
+        logger.error(f"midas_notify_user error: {e}")
+        return {'status': 'error', 'error': str(e), 'sent': 0}
+
+
 
 @api_router.post("/midas/members")
 async def midas_members(body: dict = Body(...), x_midas_key: Optional[str] = Header(None)):
