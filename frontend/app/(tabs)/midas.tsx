@@ -70,6 +70,7 @@ export default function MidasScreen() {
   const [profitTargetDraft, setProfitTargetDraft] = useState('');
   const [usesProfitTarget, setUsesProfitTarget] = useState(false);
   const [eodCloseEnabled, setEodCloseEnabled] = useState(false);
+  const [eodThresholdDraft, setEodThresholdDraft] = useState('0.4');
   const [closingPosition, setClosingPosition] = useState(false);
 
   const fetchAll = useCallback(async () => {
@@ -97,6 +98,9 @@ export default function MidasScreen() {
           setProfitTargetDraft('');
         }
         setEodCloseEnabled(!!st.value?.eod_close_enabled);
+        if (st.value?.eod_close_threshold_pct != null) {
+          setEodThresholdDraft(String(st.value.eod_close_threshold_pct));
+        }
       }
       if (tr.status === 'fulfilled') setTrades(tr.value.trades || []);
     } catch {
@@ -245,6 +249,21 @@ export default function MidasScreen() {
       setStatus(s => s ? { ...s, eod_close_enabled: val } : s);
     } catch (e: any) {
       setEodCloseEnabled(!val);
+      Alert.alert('Error', e?.message || 'Failed to update');
+    }
+  };
+
+  const saveEodThreshold = async () => {
+    const pct = parseFloat(eodThresholdDraft);
+    if (isNaN(pct) || pct < 0 || pct > 100) {
+      Alert.alert('Invalid', 'Threshold must be between 0 and 100');
+      return;
+    }
+    try {
+      await apiFetch('/api/midas/settings', { method: 'POST', body: JSON.stringify({ eod_close_threshold_pct: pct }) });
+      setStatus(s => s ? { ...s, eod_close_threshold_pct: pct } as any : s);
+      Alert.alert('Saved', `EOD close threshold set to ${pct}%`);
+    } catch (e: any) {
       Alert.alert('Error', e?.message || 'Failed to update');
     }
   };
@@ -552,7 +571,7 @@ export default function MidasScreen() {
               <Text style={s.cardTitle}>EOD Auto-Close</Text>
               <Text style={s.bodyMute}>
                 At <Text style={{ color: GOLD, fontWeight: '700' }}>12:49 PM PT</Text> (10 min before market close), automatically close your spread if it has{' '}
-                <Text style={{ color: GOLD, fontWeight: '700' }}>not captured at least 0.4%</Text> profit. Protects against holding into the final minutes.
+                <Text style={{ color: GOLD, fontWeight: '700' }}>not captured your threshold</Text> profit. Protects against holding into the final minutes.
               </Text>
             </View>
             <Switch
@@ -564,10 +583,37 @@ export default function MidasScreen() {
             />
           </View>
           {eodCloseEnabled && (
-            <View style={[s.eodActivePill]}>
-              <Ionicons name="time-outline" size={12} color={GOLD} />
-              <Text style={[s.statusTxt, { color: GOLD }]}>ACTIVE — CLOSES AT 12:49 PM PT IF &lt;0.4% PROFIT</Text>
-            </View>
+            <>
+              <View style={[s.eodActivePill]}>
+                <Ionicons name="time-outline" size={12} color={GOLD} />
+                <Text style={[s.statusTxt, { color: GOLD }]}>ACTIVE — CLOSES AT 12:49 PM PT IF BELOW THRESHOLD</Text>
+              </View>
+              {/* Configurable threshold */}
+              <View style={{ marginTop: 14 }}>
+                <Text style={[s.bodyMute, { marginBottom: 8 }]}>
+                  Close threshold (% profit) — if trade is above this % at 12:49 PM it will <Text style={{ color: GOLD, fontWeight: '700' }}>NOT</Text> be auto-closed.
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View style={[s.inputPill, { flex: 1 }]}>
+                    <TextInput
+                      style={s.inputInline}
+                      value={eodThresholdDraft}
+                      onChangeText={setEodThresholdDraft}
+                      keyboardType="decimal-pad"
+                      placeholder="0.4"
+                      placeholderTextColor={colors.textMuted}
+                    />
+                    <Text style={{ color: GOLD, fontWeight: '700' }}>%</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={s.goldBtnSm}
+                    onPress={saveEodThreshold}
+                  >
+                    <Text style={s.goldBtnSmTxt}>SAVE</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </>
           )}
         </View>
 
