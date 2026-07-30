@@ -156,6 +156,7 @@ class UserRegister(BaseModel):
     email: str
     username: str
     password: str
+    full_name: Optional[str] = None
 
 class UserLogin(BaseModel):
     email: str
@@ -559,15 +560,28 @@ async def register(data: UserRegister):
         'id': user_id,
         'email': data.email,
         'username': data.username,
+        'full_name': (data.full_name or '').strip(),
         'password_hash': hash_password(data.password),
         'is_admin': False,
         'created_at': datetime.now(timezone.utc).isoformat()
     }
     await db.users.insert_one(user_doc)
+    # Pre-populate display_name in midas_subscribers so it shows up in Discord immediately
+    display_name = (data.full_name or '').strip() or data.username
+    await db.midas_subscribers.update_one(
+        {'user_id': user_id},
+        {'$setOnInsert': {'user_id': user_id, 'display_name': display_name, 'midas_enabled': False, 'auto_trade': False, 'connected': False}},
+        upsert=True,
+    )
+    # Also update if record already exists (e.g. created via bot)
+    await db.midas_subscribers.update_one(
+        {'user_id': user_id, 'display_name': {'$in': [None, '']}},
+        {'$set': {'display_name': display_name}},
+    )
     token = create_token(user_id, False)
     return {
         'token': token,
-        'user': {'id': user_id, 'email': data.email, 'username': data.username, 'is_admin': False, 'created_at': user_doc['created_at']}
+        'user': {'id': user_id, 'email': data.email, 'username': data.username, 'full_name': display_name, 'is_admin': False, 'created_at': user_doc['created_at']}
     }
 
 
