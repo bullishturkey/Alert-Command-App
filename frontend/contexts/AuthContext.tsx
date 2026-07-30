@@ -36,7 +36,7 @@ interface AuthContextType {
   isGuest: boolean;
   serverUrl: string;
   login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
-  register: (email: string, username: string, password: string) => Promise<void>;
+  register: (email: string, username: string, password: string, fullName?: string) => Promise<void>;
   logout: () => Promise<void>;
   continueAsGuest: () => void;
   deleteAccount: () => Promise<void>;
@@ -151,14 +151,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsGuest(false);
   }, []);
 
-  const register = useCallback(async (email: string, username: string, password: string) => {
+  const register = useCallback(async (email: string, username: string, password: string, fullName?: string) => {
     const controller = withTimeout(TIMEOUT_MS);
     let resp: Response;
     try {
       resp = await fetch(`${DEFAULT_API_URL}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, username, password }),
+        body: JSON.stringify({ email, username, password, full_name: fullName || '' }),
         signal: controller.signal,
       });
     } catch (e: any) {

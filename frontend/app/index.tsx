@@ -10,6 +10,7 @@ export default function AuthScreen() {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
+  const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -56,7 +57,8 @@ export default function AuthScreen() {
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedPassword = password.trim();
     const trimmedUsername = username.trim();
-    if (!trimmedEmail || !trimmedPassword || (!isLogin && !trimmedUsername)) {
+    const trimmedFullName = fullName.trim();
+    if (!trimmedEmail || !trimmedPassword || (!isLogin && !trimmedUsername) || (!isLogin && !trimmedFullName)) {
       setError('Please fill in all fields');
       return;
     }
@@ -66,7 +68,7 @@ export default function AuthScreen() {
       if (isLogin) {
         await login(trimmedEmail, trimmedPassword, rememberMe);
       } else {
-        await register(trimmedEmail, trimmedUsername, trimmedPassword);
+        await register(trimmedEmail, trimmedUsername, trimmedPassword, trimmedFullName);
       }
     } catch (e: any) {
       setError(e.message || 'Something went wrong');
@@ -113,6 +115,16 @@ export default function AuthScreen() {
                 <TextInput testID="auth-email-input" style={styles.input} placeholder="you@example.com" placeholderTextColor={colors.textMuted} value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" />
               </View>
             </View>
+
+            {!isLogin && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Full Name</Text>
+                <View style={styles.inputRow}>
+                  <Ionicons name="person-circle-outline" size={18} color={colors.textTertiary} style={styles.inputIcon} />
+                  <TextInput testID="auth-fullname-input" style={styles.input} placeholder="Your full name" placeholderTextColor={colors.textMuted} value={fullName} onChangeText={setFullName} autoCapitalize="words" />
+                </View>
+              </View>
+            )}
 
             {!isLogin && (
               <View style={styles.inputGroup}>
