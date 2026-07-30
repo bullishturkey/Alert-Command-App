@@ -3607,6 +3607,26 @@ async def midas_notify_user(body: dict = Body(...), x_midas_key: Optional[str] =
 
 
 
+@api_router.post("/admin/midas-subscriber/{user_id}")
+async def admin_update_midas_subscriber(user_id: str, body: dict = Body(...), x_midas_key: Optional[str] = Header(None)):
+    """Bot/admin endpoint: update display_name and/or discord_id for a subscriber by user_id or account_number."""
+    _require_midas_key(x_midas_key)
+    updates: Dict[str, Any] = {}
+    if "display_name" in body:
+        updates["display_name"] = str(body["display_name"]).strip()
+    if "discord_id" in body:
+        updates["discord_id"] = str(body["discord_id"]).strip()
+    if not updates:
+        raise HTTPException(400, "Nothing to update")
+    result = await db.midas_subscribers.update_many(
+        {"$or": [{"user_id": user_id}, {"account_number": user_id}]},
+        {"$set": updates}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(404, "Trader not found")
+    return {"status": "updated", "matched": result.matched_count, "updates": updates}
+
+
 @api_router.post("/midas/lookup-users")
 async def midas_lookup_users(body: dict = Body(...), x_midas_key: Optional[str] = Header(None)):
     """Bot endpoint: look up user profiles by user_id list. Returns username/email for enrichment."""
