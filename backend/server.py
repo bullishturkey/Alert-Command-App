@@ -3677,6 +3677,21 @@ async def midas_subscribers(x_midas_key: Optional[str] = Header(None)):
         {'_id': 0},
     )
     docs = await cursor.to_list(2000)
+    # Enrich with user profile data (username, email, name) from users collection
+    user_ids = [d.get('user_id') for d in docs if d.get('user_id')]
+    user_map = {}
+    if user_ids:
+        user_docs = await db.users.find({'id': {'$in': user_ids}}, {'id': 1, 'username': 1, 'email': 1, 'name': 1}).to_list(2000)
+        user_map = {u['id']: u for u in user_docs}
+    # Also try to enrich display_name from discord_id via NDX Dashboard stripe/subscriber records
+    discord_ids = [d.get('discord_id') for d in docs if d.get('discord_id')]
+    discord_name_map = {}
+    if discord_ids:
+        dash_subs = await db.subscribers.find({'discord_id': {'$in': discord_ids}}, {'discord_id': 1, 'name': 1, 'discord_username': 1}).to_list(2000)
+        for ds in dash_subs:
+            did = ds.get('discord_id')
+            if did:
+                discord_name_map[did] = ds.get('name') or ds.get('discord_username') or ''
     out = []
     seen_accounts = set()  # Deduplicate by account_number to prevent double trades
     for d in docs:
@@ -3689,9 +3704,21 @@ async def midas_subscribers(x_midas_key: Optional[str] = Header(None)):
         bal = d.get('account_balance')
         custom = d.get('custom_contracts')
         contracts = int(custom) if custom else midas_contracts_for_balance(bal or 0)
+        user_profile = user_map.get(d.get('user_id', ''), {})
+        # Build display name: stored display_name → username → user profile name → discord-based name
+        display_name = (
+            d.get('display_name') or
+            user_profile.get('username') or
+            user_profile.get('name') or
+            discord_name_map.get(d.get('discord_id', '')) or
+            user_profile.get('email', '').split('@')[0] or
+            ''
+        )
         out.append({
             'discord_id': d.get('discord_id', ''),
             'user_id': d.get('user_id', ''),
+            'display_name': display_name,
+            'email': user_profile.get('email', ''),
             'tastytrade_client_id': midas_decrypt(d.get('tastytrade_client_id_enc') or ''),
             'tastytrade_client_secret': midas_decrypt(d.get('tastytrade_client_secret_enc') or ''),
             'tastytrade_refresh_token': midas_decrypt(d.get('tastytrade_refresh_token_enc') or ''),
@@ -3703,6 +3730,7 @@ async def midas_subscribers(x_midas_key: Optional[str] = Header(None)):
             'custom_contracts': custom,
             'profit_target_pct': d.get('profit_target_pct', None),
             'eod_close_enabled': bool(d.get('eod_close_enabled', False)),
+            'eod_close_threshold_pct': d.get('eod_close_threshold_pct', 0.4),
         })
     return {'subscribers': out, 'count': len(out)}
 
