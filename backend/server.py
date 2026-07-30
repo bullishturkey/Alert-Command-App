@@ -3607,6 +3607,19 @@ async def midas_notify_user(body: dict = Body(...), x_midas_key: Optional[str] =
 
 
 
+@api_router.post("/midas/lookup-users")
+async def midas_lookup_users(body: dict = Body(...), x_midas_key: Optional[str] = Header(None)):
+    """Bot endpoint: look up user profiles by user_id list. Returns username/email for enrichment."""
+    _require_midas_key(x_midas_key)
+    user_ids = body.get('user_ids', [])
+    if not user_ids:
+        return {'users': []}
+    users = await db.users.find(
+        {'id': {'$in': user_ids}},
+        {'_id': 0, 'id': 1, 'username': 1, 'email': 1, 'name': 1}
+    ).to_list(500)
+    return {'users': users}
+
 @api_router.post("/midas/members")
 async def midas_members(body: dict = Body(...), x_midas_key: Optional[str] = Header(None)):
     """Bot endpoint: add or remove a user from the Midas subscriber list (matched by discord_id).
