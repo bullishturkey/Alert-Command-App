@@ -3808,8 +3808,13 @@ async def midas_log_trade(body: dict = Body(...), x_midas_key: Optional[str] = H
     discord_id = str(body.get('discord_id') or '').strip()
     if not discord_id:
         raise HTTPException(status_code=400, detail='discord_id is required')
+    # Look up user_id by discord_id — try multiple lookup strategies
     sub = await db.midas_subscribers.find_one({'discord_id': discord_id}, {'_id': 0, 'user_id': 1})
     user_id = (sub or {}).get('user_id', '')
+    if not user_id:
+        # Fallback: try as string in case of type mismatch
+        sub = await db.midas_subscribers.find_one({'discord_id': str(discord_id)}, {'_id': 0, 'user_id': 1})
+        user_id = (sub or {}).get('user_id', '')
     trade = {
         'id': str(uuid.uuid4()),
         'discord_id': discord_id,
@@ -3826,6 +3831,7 @@ async def midas_log_trade(body: dict = Body(...), x_midas_key: Optional[str] = H
         'timestamp': body.get('timestamp') or datetime.now(timezone.utc).isoformat(),
     }
     await db.midas_trades.insert_one(dict(trade))
+    logger.info(f"Trade logged: discord_id={discord_id}, user_id={user_id}, status={trade['status']}, strikes={trade['short_strike']}/{trade['long_strike']}")
     return {'status': 'logged', 'id': trade['id']}
 
 
