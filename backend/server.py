@@ -75,6 +75,54 @@ async def send_password_reset_email(name: str, email: str, token: str):
         logger.error(f"Password reset email exception for {email}: {e}")
         return False
 
+async def send_notification_email(email: str, subject: str, html_body: str) -> bool:
+    """Send a general-purpose notification email via Resend."""
+    if not RESEND_API_KEY:
+        logger.warning("RESEND_API_KEY is not set — notification email cannot be sent.")
+        return False
+    if not email:
+        logger.warning("No email address provided — notification email skipped.")
+        return False
+    try:
+        async with httpx.AsyncClient() as c:
+            resp = await c.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "from": "Alerts Command <noreply@ndxalerts.com>",
+                    "to": [email],
+                    "subject": subject,
+                    "html": html_body,
+                },
+                timeout=10
+            )
+            if resp.status_code >= 400:
+                logger.error(f"Resend API error {resp.status_code} for {email}: {resp.text}")
+                return False
+            logger.info(f"Notification email sent to {email} via Resend (status {resp.status_code})")
+            return True
+    except Exception as e:
+        logger.error(f"Notification email exception for {email}: {e}")
+        return False
+
+
+async def send_credential_expired_email(email: str, name: str) -> bool:
+    """Send a 'Tastytrade credentials expired' notification email."""
+    html = f"""
+    <div style="background:#0a0a0a;color:#fff;font-family:sans-serif;padding:40px;max-width:560px;margin:0 auto">
+      <h1 style="font-size:22px;margin-bottom:8px">⚠️ Tastytrade Credentials Expired</h1>
+      <p style="color:#888;font-size:15px;line-height:1.6">Hi {name}, your Tastytrade connection has expired and auto-trading has been paused.</p>
+      <div style="text-align:center;margin:32px 0">
+        <a href="https://ndxalerts.com/customer" style="background:#00E5A0;color:#000;padding:14px 32px;border-radius:8px;font-weight:700;font-size:15px;text-decoration:none;display:inline-block">Reconnect Tastytrade →</a>
+      </div>
+      <p style="color:#888;font-size:14px;line-height:1.6"><strong>What happened:</strong> The refresh token linked to your Tastytrade account was rejected (invalid_grant). This happens when the token is revoked or expires.</p>
+      <p style="color:#888;font-size:14px;line-height:1.6"><strong>How to fix:</strong> Open the Alerts Command app, go to Midas settings, disconnect your Tastytrade account, then reconnect with fresh credentials from my.tastytrade.com.</p>
+      <p style="color:#555;font-size:12px;margin-top:32px">Alerts Command · Trading Intelligence Platform</p>
+    </div>
+    """
+    return await send_notification_email(email, "⚠️ Tastytrade Credentials Expired — Action Required", html)
+
+
 WEBHOOK_SECRET = os.environ.get('WEBHOOK_SECRET', '')
 
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
@@ -2851,7 +2899,7 @@ async def admin_assign_affiliate(user_id: str, body: dict = Body(...), user=Depe
         {"$set": {"ref_code": ref_code}},
         upsert=False
     )
-    logger.info(f"Affiliate {ref_code} manually assigned to {target.get("email")} by admin")
+    logger.info(f"Affiliate {ref_code} manually assigned to {target.get('email')} by admin")
     return {"status": "ok", "user_id": user_id, "ref_code": ref_code}
 
 
@@ -3254,38 +3302,49 @@ async def midas_connect(body: dict = Body(...), user=Depends(get_current_user)):
     if not client_secret or not refresh_token:
         raise HTTPException(status_code=400, detail='client_secret and refresh_token are required')
 
-    # Fetch account number from Tastytrade to check for duplicates
+    # ── Validate credentials against Tastytrade BEFORE saving ──
     try:
         bal_res = await _tastytrade_fetch_balance(client_id, client_secret, refresh_token)
-        if bal_res and bal_res.get('account_number'):
-            acct_num = bal_res['account_number']
-            # Check if another user already has this account number
-            existing = await db.midas_subscribers.find_one({
-                'account_number': acct_num,
-                'user_id': {'$ne': user['id']},
-                'connected': True,
-            })
-            if existing:
-                logger.warning(f"Duplicate account number {acct_num} attempted by user {user['id']}")
-                raise HTTPException(status_code=409, detail='This Tastytrade account is already connected to another account. Please contact support.')
+        if not bal_res or not bal_res.get('account_number'):
+            # Credentials are invalid — don't save anything
+            logger.warning(f"Midas connect: invalid credentials for user {user['id']}")
+            raise HTTPException(
+                status_code=400,
+                detail='Tastytrade credentials are invalid. Please check your client_id, client_secret, and refresh_token, then try again.'
+            )
+        acct_num = bal_res['account_number']
+        balance = bal_res.get('balance', 0)
+        # Check if another user already has this account number
+        existing = await db.midas_subscribers.find_one({
+            'account_number': acct_num,
+            'user_id': {'$ne': user['id']},
+            'connected': True,
+        })
+        if existing:
+            logger.warning(f"Duplicate account number {acct_num} attempted by user {user['id']}")
+            raise HTTPException(status_code=409, detail='This Tastytrade account is already connected to another account. Please contact support.')
     except HTTPException:
         raise
     except Exception as e:
-        logger.warning(f"Could not verify account number uniqueness: {e}")
+        logger.warning(f"Could not verify Tastytrade credentials: {e}")
+        raise HTTPException(status_code=400, detail=f'Could not connect to Tastytrade. Please verify your credentials and try again. ({e})')
 
+    # ── Credentials validated — save them with account number + balance + auto-trade ON ──
     update_doc: Dict[str, Any] = {
         'tastytrade_client_secret_enc': midas_encrypt(client_secret),
         'tastytrade_refresh_token_enc': midas_encrypt(refresh_token),
         'connected': True,
-        'account_balance': None,
-        'balance_updated_at': None,
+        'account_number': acct_num,
+        'account_balance': balance,
+        'balance_updated_at': datetime.now(timezone.utc).isoformat(),
         'connected_at': datetime.now(timezone.utc).isoformat(),
+        'auto_trade': True,  # Re-enable auto-trade on valid credential update
     }
     if client_id:
         update_doc['tastytrade_client_id_enc'] = midas_encrypt(client_id)
     await db.midas_subscribers.update_one({'user_id': user['id']}, {'$set': update_doc})
-    logger.info(f"Midas: user {user['username']} connected Tastytrade (client_id provided: {bool(client_id)})")
-    return {'status': 'connected'}
+    logger.info(f"Midas: user {user['username']} connected Tastytrade (account: {acct_num}, balance: ${balance}) — auto-trade enabled")
+    return {'status': 'connected', 'account_number': acct_num, 'account_balance': balance, 'auto_trade': True}
 
 
 @api_router.post("/midas/disconnect")
@@ -3619,6 +3678,62 @@ async def midas_notify_user(body: dict = Body(...), x_midas_key: Optional[str] =
         logger.error(f"midas_notify_user error: {e}")
         return {'status': 'error', 'error': str(e), 'sent': 0}
 
+
+@api_router.post("/midas/credentials-expired")
+async def midas_credentials_expired(body: dict = Body(...), x_midas_key: Optional[str] = Header(None)):
+    """Bot endpoint: Midas calls this when it detects invalid_grant on a trade attempt.
+    Sends push notification + email to the user and disables auto-trade.
+    Body: { discord_id, display_name? }
+    """
+    _require_midas_key(x_midas_key)
+    discord_id = str(body.get('discord_id') or '').strip()
+    display_name = str(body.get('display_name') or 'Subscriber').strip()
+    if not discord_id:
+        raise HTTPException(status_code=400, detail='discord_id is required')
+    # Find the subscriber
+    sub = await db.midas_subscribers.find_one({'discord_id': discord_id}, {'user_id': 1, 'display_name': 1})
+    if not sub:
+        return {'status': 'not_found'}
+    user_id = sub.get('user_id')
+    # Disable auto-trade
+    await db.midas_subscribers.update_one(
+        {'discord_id': discord_id},
+        {'$set': {'auto_trade': False, 'credential_status': 'expired', 'credential_expired_at': datetime.now(timezone.utc).isoformat()}}
+    )
+    logger.warning(f"Credentials expired for discord_id={discord_id} (user_id={user_id}) — auto-trade disabled, sending notifications")
+    # Send push notification
+    push_sent = 0
+    if user_id:
+        try:
+            from exponent_server_sdk import PushClient, PushMessage
+            token_docs = await db.push_tokens.find({'user_id': user_id}, {'token': 1}).to_list(20)
+            tokens = [d['token'] for d in token_docs if d.get('token')]
+            if tokens:
+                messages = [PushMessage(
+                    to=tok, title="⚠️ Tastytrade Credentials Expired",
+                    body="Your auto-trader has been paused. Tap to reconnect your Tastytrade account.",
+                    data={'type': 'credential_expired'},
+                    sound='default', priority='high',
+                ) for tok in tokens]
+                def _publish():
+                    return PushClient().publish_multiple(messages)
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, _publish)
+                push_sent = len(tokens)
+                logger.info(f"Credential-expired push sent to {push_sent} device(s) for discord_id={discord_id}")
+        except ImportError:
+            logger.warning("exponent_server_sdk not installed — push skipped")
+        except Exception as e:
+            logger.error(f"Push notification error for credentials-expired: {e}")
+    # Send email
+    email_sent = False
+    if user_id:
+        user_doc = await db.users.find_one({'id': user_id}, {'email': 1, 'username': 1, 'name': 1})
+        if user_doc and user_doc.get('email'):
+            email = user_doc['email']
+            name = user_doc.get('name') or user_doc.get('username') or display_name
+            email_sent = await send_credential_expired_email(email, name)
+    return {'status': 'ok', 'push_sent': push_sent, 'email_sent': email_sent}
 
 
 @api_router.post("/admin/midas-subscriber/{user_id}")
