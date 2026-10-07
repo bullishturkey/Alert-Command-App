@@ -3557,11 +3557,17 @@ async def midas_close_position(user=Depends(get_current_user)):
 
 @api_router.get("/midas/trades")
 async def midas_my_trades(user=Depends(get_current_user), limit: int = 100):
-    """Return the trade history for the current user."""
+    """Return the trade history for the current user.
+    Falls back to discord_id matching in case a trade was logged with a blank/stale
+    user_id (e.g. the bot's discord_id -> user_id lookup missed at trade time)."""
     doc = await _ensure_midas_doc(user['id'])
     if not (doc.get('midas_enabled') != False or user.get('is_admin')):
         return {'trades': []}
-    cursor = db.midas_trades.find({'user_id': user['id']}, {'_id': 0}).sort('timestamp', -1).limit(min(max(limit, 1), 500))
+    discord_id = doc.get('discord_id') or ''
+    query = {'user_id': user['id']}
+    if discord_id:
+        query = {'$or': [{'user_id': user['id']}, {'discord_id': discord_id}]}
+    cursor = db.midas_trades.find(query, {'_id': 0}).sort('timestamp', -1).limit(min(max(limit, 1), 500))
     trades = await cursor.to_list(length=limit)
     return {'trades': trades}
 
