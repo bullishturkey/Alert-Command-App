@@ -3834,11 +3834,102 @@ async def midas_log_trade(body: dict = Body(...), x_midas_key: Optional[str] = H
         'account_balance': body.get('account_balance'),
         'order_id': body.get('order_id') or '',
         'status': (body.get('status') or 'pending').lower(),
+        'pnl': None,  # set later by /midas/trade-close when the spread exits
         'timestamp': body.get('timestamp') or datetime.now(timezone.utc).isoformat(),
     }
     await db.midas_trades.insert_one(dict(trade))
     logger.info(f"Trade logged: discord_id={discord_id}, user_id={user_id}, status={trade['status']}, strikes={trade['short_strike']}/{trade['long_strike']}")
     return {'status': 'logged', 'id': trade['id']}
+
+
+@api_router.post("/midas/trade-close")
+async def midas_trade_close(body: dict = Body(...), x_midas_key: Optional[str] = Header(None)):
+    """Bot endpoint: called when a spread closes/expires. Finds the matching open
+    trade (same discord_id + short_strike + long_strike, most recent, no pnl yet)
+    and writes the realized pnl onto it so the admin command-center's P&L figures
+    (which read directly from this midas_trades collection) are no longer 0 for
+    every client. Also inserts a standalone close record as a fallback if no
+    matching open trade is found.
+    Body: { discord_id, short_strike, long_strike, pnl, outcome, exit_price, contracts }
+    """
+    _require_midas_key(x_midas_key)
+    discord_id = str(body.get('discord_id') or '').strip()
+    if not discord_id:
+        raise HTTPException(status_code=400, detail='discord_id is required')
+    pnl = body.get('pnl')
+    short_strike = body.get('short_strike')
+    long_strike = body.get('long_strike')
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    match_q = {
+        'discord_id': discord_id,
+        'short_strike': short_strike,
+        'long_strike': long_strike,
+        'pnl': None,
+    }
+    candidate = await db.midas_trades.find_one(match_q, sort=[('timestamp', -1)])
+    if candidate:
+        await db.midas_trades.update_one(
+            {'id': candidate['id']},
+            {'$set': {
+                'pnl': pnl,
+                'outcome': body.get('outcome'),
+                'exit_price': body.get('exit_price'),
+                'closed_at': now_iso,
+            }},
+        )
+        logger.info(f"Trade closed: discord_id={discord_id}, pnl={pnl}, strikes={short_strike}/{long_strike}")
+        return {'status': 'closed', 'id': candidate['id']}
+
+    # No matching open trade found — insert standalone close record so the P&L
+    # still counts toward totals even though it can't be tied to an open leg.
+    sub = await db.midas_subscribers.find_one({'discord_id': discord_id}, {'_id': 0, 'user_id': 1})
+    close_doc = {
+        'id': str(uuid.uuid4()),
+        'discord_id': discord_id,
+        'user_id': (sub or {}).get('user_id', ''),
+        'underlying': 'NDX',
+        'short_strike': short_strike,
+        'long_strike': long_strike,
+        'contracts': int(body.get('contracts') or 0),
+        'pnl': pnl,
+        'outcome': body.get('outcome'),
+        'exit_price': body.get('exit_price'),
+        'status': 'closed',
+        'timestamp': now_iso,
+        'closed_at': now_iso,
+    }
+    await db.midas_trades.insert_one(close_doc)
+    logger.warning(f"Trade close had no matching open trade — inserted standalone close record for discord_id={discord_id}")
+    return {'status': 'closed_standalone', 'id': close_doc['id']}
+
+
+@api_router.post("/midas/subscribers/{discord_id}")
+async def midas_update_subscriber(discord_id: str, body: dict = Body(...), x_midas_key: Optional[str] = Header(None)):
+    """Bot endpoint: update a subscriber's settings/account data by discord_id.
+    Used by Midas for limit_price/auto_trade changes AND periodic account_balance
+    / account_number sync. This endpoint did not previously exist — every call
+    from the bot's update_subscriber() was 404ing silently, which is why account
+    balances and auto_trade toggles never reflected in the admin portal."""
+    _require_midas_key(x_midas_key)
+    discord_id = discord_id.strip()
+    if not discord_id:
+        raise HTTPException(status_code=400, detail='discord_id is required')
+    allowed_fields = {
+        'limit_price', 'auto_trade', 'account_balance', 'account_number',
+        'balance_updated_at', 'profit_target_pct', 'eod_close_enabled',
+        'eod_close_threshold_pct', 'custom_contracts', 'midas_enabled',
+    }
+    update_doc = {k: v for k, v in body.items() if k in allowed_fields}
+    if not update_doc:
+        raise HTTPException(status_code=400, detail='No valid fields to update')
+    update_doc['updated_at'] = datetime.now(timezone.utc).isoformat()
+    result = await db.midas_subscribers.update_one(
+        {'discord_id': discord_id}, {'$set': update_doc}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail=f'No subscriber found for discord_id={discord_id}')
+    return {'status': 'updated', 'discord_id': discord_id, 'fields': list(update_doc.keys())}
 
 
 @api_router.get("/midas/subscribers")
